@@ -1,4 +1,4 @@
-from baselines.common.cmd_util import make_atari_env
+from baselines.common.cmd_util import make_vec_env
 from baselines.common.vec_env.vec_frame_stack import VecFrameStack
 from arguments import achieve_arguments
 from a2c_agent import a2c_agent
@@ -9,7 +9,7 @@ if __name__ == '__main__':
     logger.configure(dir=args.log_dir)
     # create environments
     env_args = {'episode_life': False, 'clip_rewards': False}
-    envs = VecFrameStack(make_atari_env(args.env_name, args.num_processes, args.seed, wrapper_kwargs=env_args), 4)
+    envs = VecFrameStack(make_vec_env(args.env_name, 'atari', args.num_processes, args.seed, wrapper_kwargs=env_args), 4)
     trainer = a2c_agent(envs, args)
     trainer.learn()
     envs.close()
