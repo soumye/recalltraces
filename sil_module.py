@@ -94,6 +94,7 @@ class sil_module:
     def __init__(self, network, args, optimizer):
         self.args = args
         self.network = network
+        #Create an episode buffer of size : # processes
         self.running_episodes = [[] for _ in range(self.args.num_processes)]
         self.optimizer = optimizer
         self.buffer = PrioritizedReplayBuffer(self.args.capacity, self.args.sil_alpha)
@@ -109,6 +110,7 @@ class sil_module:
         for n, done in enumerate(dones):
             if done:
                 self.update_buffer(self.running_episodes[n])
+                # Clear the episode buffer
                 self.running_episodes[n] = []
     
     # train the sil model...
@@ -168,7 +170,7 @@ class sil_module:
                 self.buffer.update_priorities(idxes, clipped_advantages.squeeze(1).cpu().numpy())
         return mean_adv, num_valid_samples
     
-    # update buffer
+    # update buffer. # Add single episode to PER Buffer and update stuff
     def update_buffer(self, trajectory):
         positive_reward = False
         for (ob, a, r) in trajectory:
@@ -182,7 +184,8 @@ class sil_module:
             while np.sum(self.total_steps) > self.args.capacity and len(self.total_steps) > 1:
                 self.total_steps.pop(0)
                 self.total_rewards.pop(0)
-
+    
+    # Add single episode to PER Buffer
     def add_episode(self, trajectory):
         obs = []
         actions = []
@@ -196,6 +199,7 @@ class sil_module:
             actions.append(action)
             rewards.append(np.sign(reward))
             dones.append(False)
+        # Put done at end of trajectory
         dones[len(dones) - 1] = True
         returns = self.discount_with_dones(rewards, dones, self.args.gamma)
         for (ob, action, R) in list(zip(obs, actions, returns)):

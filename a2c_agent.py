@@ -6,12 +6,13 @@ from utils import select_actions, evaluate_actions, discount_with_dones
 import os
 from sil_module import sil_module
 import copy
+import ipdb
 
 class a2c_agent:
     def __init__(self, envs, args):
         self.envs = envs
         self.args = args
-        # define the network
+        # define the network. Gives V(s) and π(a|S)
         self.net = Net(self.envs.action_space.n)
         if self.args.cuda:
             self.net.cuda()
@@ -24,11 +25,15 @@ class a2c_agent:
         if not os.path.exists(self.model_path):
             os.mkdir(self.model_path)
         # get the obs..
+        # the shape of the observation batch : 80x84x84x4
         self.batch_ob_shape = (self.args.num_processes * self.args.nsteps,) + self.envs.observation_space.shape
+        # Initialize observation seen by the environment. Dim : # of processes(16) X observation_space.shape(84x84x4)
         self.obs = np.zeros((self.args.num_processes,) + self.envs.observation_space.shape, dtype=self.envs.observation_space.dtype.name)
+        # env already encapsulated the multiple processes
         self.obs[:] = self.envs.reset()
+        # track completed processes
         self.dones = [False for _ in range(self.args.num_processes)]
-
+    
     # train the network..
     def learn(self):
         if not self.args.no_sil:
@@ -41,6 +46,7 @@ class a2c_agent:
         for update in range(num_updates):
             mb_obs, mb_rewards, mb_actions, mb_dones = [],[],[],[]
             for step in range(self.args.nsteps):
+                # Executing the action after seeing the observation
                 with torch.no_grad():
                     input_tensor = self._get_tensors(self.obs)
                     _, pi = self.net(input_tensor)
@@ -51,7 +57,7 @@ class a2c_agent:
                 mb_obs.append(np.copy(self.obs))
                 mb_actions.append(cpu_actions)
                 mb_dones.append(self.dones)
-                # step
+                # step in gym batched environment
                 obs, rewards, dones, _ = self.envs.step(cpu_actions)
                 # process rewards...
                 raw_rewards = copy.deepcopy(rewards)
@@ -59,6 +65,7 @@ class a2c_agent:
                 # start to store the rewards
                 self.dones = dones
                 if not self.args.no_sil:
+                    # Update the Buffers after doing the step
                     sil_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones)
                 mb_rewards.append(rewards)
                 for n, done in enumerate(dones):
@@ -75,7 +82,9 @@ class a2c_agent:
                 # update the obs
             mb_dones.append(self.dones)
             # process the rollouts
+            # 5x16xobs_shape to 80 x obs_shape
             mb_obs = np.asarray(mb_obs, dtype=np.uint8).swapaxes(1, 0).reshape(self.batch_ob_shape)
+            # 5x16 To 16x5
             mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
             mb_actions = np.asarray(mb_actions, dtype=np.int32).swapaxes(1, 0)
             mb_dones = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
@@ -84,18 +93,20 @@ class a2c_agent:
             with torch.no_grad():
                 input_tensor = self._get_tensors(self.obs)
                 last_values, _ = self.net(input_tensor)
-            # compute returns
+            # compute returns via 5-step lookahead. 
             for n, (rewards, dones, value) in enumerate(zip(mb_rewards, mb_dones, last_values.detach().cpu().numpy().squeeze())):
                 rewards = rewards.tolist()
                 dones = dones.tolist()
                 if dones[-1] == 0:
+                    # Passed in [value] for the estimated V(curr_obs) in TD Learning
                     rewards = discount_with_dones(rewards+[value], dones+[0], self.args.gamma)[:-1]
                 else:
                     rewards = discount_with_dones(rewards, dones, self.args.gamma)
                 mb_rewards[n] = rewards
+            # Convert 16 x 5 points to 80 flat points
             mb_rewards = mb_rewards.flatten()
             mb_actions = mb_actions.flatten()
-            # start to update network
+            # start to update network. Doing A2C Update
             vl, al, ent = self._update_network(mb_obs, mb_rewards, mb_actions)
             # start to update the sil_module
             if not self.args.no_sil:
@@ -120,6 +131,7 @@ class a2c_agent:
         input_tensor = self._get_tensors(obs)
         values, pi = self.net(input_tensor)
         # define the tensor of actions, returns
+        # convert to 2D tensor of 80x1
         returns = torch.tensor(returns, dtype=torch.float32).unsqueeze(1)
         actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1)
         if self.args.cuda:
@@ -131,7 +143,7 @@ class a2c_agent:
         advantages = returns - values
         # get the value loss
         value_loss = advantages.pow(2).mean()
-        # get the action loss
+        # get the action loss. We detach advantages to reduce to standard PG form upon diff
         action_loss = -(advantages.detach() * action_log_probs).mean()
         # total loss
         total_loss = action_loss + self.args.value_loss_coef * value_loss - self.args.entropy_coef * dist_entropy

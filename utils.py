@@ -10,7 +10,7 @@ def select_actions(pi, deterministic=False):
     else:
         return cate_dist.sample().unsqueeze(-1)
 
-# get the action log prob and entropy...
+# get the action log prob and entropy... Will be used for entropy regularization
 def evaluate_actions(pi, actions):
     cate_dist = Categorical(pi)
     return cate_dist.log_prob(actions.squeeze(-1)).unsqueeze(-1), cate_dist.entropy().mean()
