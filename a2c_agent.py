@@ -47,7 +47,8 @@ class a2c_agent:
         final_rewards = torch.zeros([self.args.num_processes, 1])
         # start to update
         for update in range(num_updates):
-            mb_obs, mb_rewards, mb_actions, mb_dones = [],[],[],[]
+            # mb_obs, mb_rewards, mb_actions, mb_dones, mb_obs_next = [], [], [], [], []
+            mb_obs, mb_rewards, mb_actions, mb_dones = [], [], [], []
             for step in range(self.args.nsteps):
                 # Executing the action after seeing the observation
                 with torch.no_grad():
@@ -56,27 +57,31 @@ class a2c_agent:
                 # select actions
                 actions = select_actions(pi)
                 cpu_actions = actions.squeeze(1).cpu().numpy()
+                # step in gym batched environment
+                obs, rewards, dones, _ = self.envs.step(cpu_actions)
                 # start to store the information
                 mb_obs.append(np.copy(self.obs))
                 mb_actions.append(cpu_actions)
                 mb_dones.append(self.dones)
-                # step in gym batched environment
-                obs, rewards, dones, _ = self.envs.step(cpu_actions)
                 # process rewards...
                 raw_rewards = copy.deepcopy(rewards)
                 rewards = np.sign(rewards)
                 # start to store the rewards
-                self.dones = dones
-                if self.args.model_type == 'sil':
-                    # Update the Buffers after doing the step
-                    sil_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones)
-                elif self.args.model_type == 'bw':
-                    bw_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones)
                 mb_rewards.append(rewards)
+                # mb_obs_next.append(np.copy(obs))
+                self.dones = dones
                 for n, done in enumerate(dones):
                     if done:
                         self.obs[n] = self.obs[n]*0
                 self.obs = obs
+
+                if self.args.model_type == 'sil':
+                    # Update the Buffers after doing the step
+                    sil_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones)
+                elif self.args.model_type == 'bw':
+                    obs_next = self._get_tensors(self.obs).detach().cpu().numpy()
+                    bw_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones, obs_next)
+
                 raw_rewards = torch.from_numpy(np.expand_dims(np.stack(raw_rewards), 1)).float()
                 episode_rewards += raw_rewards
                 # get the masks
@@ -89,6 +94,7 @@ class a2c_agent:
             # process the rollouts
             # 5x16xobs_shape to 80 x obs_shape
             mb_obs = np.asarray(mb_obs, dtype=np.uint8).swapaxes(1, 0).reshape(self.batch_ob_shape)
+            # mb_obs_next = np.asarray(mb_obs_next, dtype=np.uint8).swapaxes(1, 0).reshape(self.batch_ob_shape)
             # 5x16 To 16x5
             mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
             mb_actions = np.asarray(mb_actions, dtype=np.int32).swapaxes(1, 0)
@@ -118,8 +124,7 @@ class a2c_agent:
             if self.args.model_type == 'sil':
                 mean_adv, num_samples = sil_model.train_sil_model()
             elif self.args.model_type == 'bw':
-                raise NotImplementedError
-            ipdb.set_trace()
+                bw_model.train_bw_model()
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \

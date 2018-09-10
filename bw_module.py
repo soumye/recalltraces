@@ -3,6 +3,7 @@ import torch
 import random
 from baselines.common.segment_tree import SumSegmentTree, MinSegmentTree
 from utils import evaluate_actions_sil
+
 # replay buffer...
 class ReplayBuffer:
     def __init__(self, size):
@@ -109,9 +110,9 @@ class bw_module:
         self.total_rewards = []
 
     # add the batch information into it...
-    def step(self, obs, actions, rewards, dones):
+    def step(self, obs, actions, rewards, dones, obs_next):
         for n in range(self.args.num_processes):
-            self.running_episodes[n].append([obs[n], actions[n], rewards[n]])
+            self.running_episodes[n].append([obs[n], actions[n], rewards[n], obs_next[n]])
         # to see if can update the episode...
         for n, done in enumerate(dones):
             if done:
@@ -120,7 +121,7 @@ class bw_module:
                 self.running_episodes[n] = []
     
     # train the bw model...
-    def train_sil_model(self):
+    def train_bw_model(self):
         for n in range(self.args.n_update):
             obs, actions, returns, weights, idxes = self.sample_batch(self.args.batch_size)
             mean_adv, num_valid_samples = 0, 0
@@ -182,7 +183,7 @@ class bw_module:
     # update buffer. # Add single episode to PER Buffer and update stuff
     def update_buffer(self, trajectory):
         positive_reward = False
-        for (ob, a, r) in trajectory:
+        for (ob, a, r, ob_next) in trajectory:
             if r > 0:
                 positive_reward = True
                 break
@@ -195,24 +196,29 @@ class bw_module:
                 self.total_rewards.pop(0)
     
     # Add single episode to PER Buffer
-    def add_episode(self, trajectory):
+    def add_episode(self, trajectory):-
         obs = []
         actions = []
         rewards = []
         dones = []
-        for (ob, action, reward) in trajectory:
+        obs_next = []
+        for (ob, action, reward, ob_next) in trajectory:
             if ob is not None:
                 obs.append(ob)
             else:
                 obs.append(None)
+            if ob_next is not None:
+                obs_next.append(ob_next)
+            else:
+                obs_next.append(None)
             actions.append(action)
             rewards.append(np.sign(reward))
             dones.append(False)
         # Put done at end of trajectory
         dones[len(dones) - 1] = True
         returns = self.discount_with_dones(rewards, dones, self.args.gamma)
-        for (ob, action, R) in list(zip(obs, actions, returns)):
-            self.buffer.add(ob, action, R)
+        for (ob, action, R, ob_next) in list(zip(obs, actions, returns, obs_next)):
+            self.buffer.add(ob, action, R, ob_next)
 
     def fn_reward(self, reward):
         return np.sign(reward)
