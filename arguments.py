@@ -29,8 +29,8 @@ def achieve_arguments():
     parse.add_argument('--clip', type=float, default=1, help='clip parameters')
     parse.add_argument('--w-value', type=float, default=0.01, help='the wloss coefficient')
     parse.add_argument('--log-dir', type=str, default='logs/', help='the log dir')
-    parse.add_argument('--no-sil', action='store_true', help='check if use the sil')
-
+    # parse.add_argument('--no-sil', action='store_true', help='check if use the sil')
+    parse.add_argument('--model-type', type=str, default='sil', help='Which model to use: "vanilla", "sil", "bw"' )
     args = parse.parse_args()
 
     return args

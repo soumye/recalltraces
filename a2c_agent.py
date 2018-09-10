@@ -1,10 +1,11 @@
 import numpy as np
 import torch
-from models import Net
+from models import Net, ActGen, StateGen
 from datetime import datetime
 from utils import select_actions, evaluate_actions, discount_with_dones
 import os
 from sil_module import sil_module
+from bw_module import bw_module
 import copy
 import ipdb
 
@@ -36,8 +37,10 @@ class a2c_agent:
     
     # train the network..
     def learn(self):
-        if not self.args.no_sil:
+        if self.args.model_type == 'sil':
             sil_model = sil_module(self.net, self.args, self.optimizer)
+        elif self.args.model_type == 'bw':
+            bw_model = bw_module(self.net, self.args, self.optimizer)
         num_updates = self.args.total_frames // (self.args.num_processes * self.args.nsteps)
         # get the reward to calculate other information
         episode_rewards = torch.zeros([self.args.num_processes, 1])
@@ -64,9 +67,11 @@ class a2c_agent:
                 rewards = np.sign(rewards)
                 # start to store the rewards
                 self.dones = dones
-                if not self.args.no_sil:
+                if self.args.model_type == 'sil':
                     # Update the Buffers after doing the step
                     sil_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones)
+                elif self.args.model_type == 'bw':
+                    bw_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones)
                 mb_rewards.append(rewards)
                 for n, done in enumerate(dones):
                     if done:
@@ -108,16 +113,22 @@ class a2c_agent:
             mb_actions = mb_actions.flatten()
             # start to update network. Doing A2C Update
             vl, al, ent = self._update_network(mb_obs, mb_rewards, mb_actions)
+            
             # start to update the sil_module
-            if not self.args.no_sil:
+            if self.args.model_type == 'sil':
                 mean_adv, num_samples = sil_model.train_sil_model()
+            elif self.args.model_type == 'bw':
+                raise NotImplementedError
+            ipdb.set_trace()
             if update % self.args.log_interval == 0:
-                if not self.args.no_sil:
+                if self.args.model_type == 'sil':
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
                             'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, VS:{}, S:{}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
+                elif self.args.model_type == 'bw':
+                    raise NotImplementedError
                 else:
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
                             'Ent: {:.2f}, Min: {}, Max:{}'.format(\
