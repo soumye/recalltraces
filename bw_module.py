@@ -1,11 +1,15 @@
 import numpy as np
 import torch
+import torch.nn as nn
 import random
+from models import ActGen, StateGen
 from baselines.common.segment_tree import SumSegmentTree, MinSegmentTree
 from utils import evaluate_actions_sil
 
-# replay buffer...
 class ReplayBuffer:
+    """
+    Replay buffer...
+    """
     def __init__(self, size):
         self._storage = []
         self._maxsize = size
@@ -91,26 +95,86 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         return tuple(list(encoded_sample) + [weights, idxes])
 
 class bw_module:
-    def __init__(self, network, args, optimizer):
+    def __init__(self, network, args, optimizer, num_actions):
         self.args = args
         self.network = network
         self.optimizer = optimizer
         #Create Backward models
-        self.bw_actgen = ActGen(self.envs.action_space.n)
-        self.bw_stategen = StateGen(self.envs.action_space.n)
+        self.bw_actgen = ActGen(num_actions)
+        self.bw_stategen = StateGen(num_actions)
         if self.args.cuda:
             self.bw_actgen.cuda()
             self.bw_stategen.cuda()
-        self.bw_optimizer = torch.optim.RMSprop(list(self.bw_actgen.parameters(), self.bw_stategen.parameters()), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+        self.bw_params = list(self.bw_actgen.parameters()) + list(self.bw_stategen.parameters())
+        self.bw_optimizer = torch.optim.RMSprop(self.bw_params, lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
         #Create an episode buffer of size : # processes
         self.running_episodes = [[] for _ in range(self.args.num_processes)]
         self.buffer = PrioritizedReplayBuffer(self.args.capacity, self.args.sil_alpha)
         # some other parameters...
         self.total_steps = []
         self.total_rewards = []
+    
+    def train_bw_model(self):
+        """
+        Train the bw_model in 3 Steps
+        1. Sample high value (s,a,r,s) from PER Buffer, Compute bw_model loss & Optimize
+        2. Generate Recall traces from bw_model
+        3. Do imiation learning using those recall traces
+        """
+        obs, actions, returns, obs_next, weights, idxes = self.sample_batch(self.args.batch_size)
+        mean_adv, num_valid_samples = 0, 0
+        if obs is not None and obs_next is not None:
+            # need to get the masks
+            # get basic information of network..
+            obs = torch.tensor(obs, dtype=torch.float32)
+            obs_next = torch.tensor(obs_next, dtype=torch.float32)
+            actions = torch.tensor(actions, dtype=torch.float32).unsqueeze(1)
+            returns = torch.tensor(returns, dtype=torch.float32).unsqueeze(1)
+            weights = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
+            max_nlogp = torch.tensor(np.ones((len(idxes), 1)) * self.args.max_nlogp, dtype=torch.float32)
+            if self.args.cuda:
+                obs = obs.cuda()
+                obs_next = obs_next.cuda()
+                actions = actions.cuda()
+                returns = returns.cuda()
+                weights = weights.cuda()
+                max_nlogp = max_nlogp.cuda()
+            pi = self.bw_actgen(obs_next)
+            mu = self.bw_stategen(obs_next, actions)
+            # Naive losses without weighting
+            # loss_actgen = torch.nn.LLLoss(pi, actions.unsqueeze(1))
+            # loss_stategen = nn.MSELoss(obs-obs_next, mu)
 
-    # add the batch information into it...
+            # Losses with weightings and entropy regularization
+            action_log_probs, dist_entropy = evaluate_actions_sil(pi, actions)
+            action_log_probs = -action_log_probs
+            clipped_nlogp = torch.min(action_log_probs, max_nlogp)
+            action_loss = torch.sum(weights * clipped_nlogp) / self.args.mini_batch_size
+            entropy_reg = torch.sum(weights*dist_entropy) / self.args.mini_batch_size
+            loss_actgen = action_loss - entropy_reg * self.args.entropy_coef
+            square_error = ((obs - obs_next - mu)**2).view(self.args.batch_size, -1)
+            loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / self.args.arg.mini_batch_size
+            
+            total_loss = loss_actgen + 0.5*loss_stategen
+            self.bw_optimizer.zero_grad()
+            total_loss.Backward()
+            torch.nn.utils.clip_grad_norm_(self.bw_params, self.args.max_grad_norm)
+            self.bw_optimizer.step()
+
+            #Now updating the priorities in the PER Buffer. Use Net Value estimates
+            with torch.no_grad():
+                value, _ = self.network(obs_next)
+                value = torch.clamp(value, min=0)
+                self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
+        return
+    
+    def generate_traces():
+        raise NotImplementedError
+
     def step(self, obs, actions, rewards, dones, obs_next):
+        """
+        Add the batch information into the Buffers
+        """
         for n in range(self.args.num_processes):
             self.running_episodes[n].append([obs[n], actions[n], rewards[n], obs_next[n]])
         # to see if can update the episode...
@@ -120,68 +184,10 @@ class bw_module:
                 # Clear the episode buffer
                 self.running_episodes[n] = []
     
-    # train the bw model...
-    def train_bw_model(self):
-        for n in range(self.args.n_update):
-            obs, actions, returns, weights, idxes = self.sample_batch(self.args.batch_size)
-            mean_adv, num_valid_samples = 0, 0
-            if obs is not None:
-                # need to get the masks
-                # get basic information of network..
-                obs = torch.tensor(obs, dtype=torch.float32)
-                actions = torch.tensor(actions, dtype=torch.float32).unsqueeze(1)
-                returns = torch.tensor(returns, dtype=torch.float32).unsqueeze(1)
-                weights = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
-                max_nlogp = torch.tensor(np.ones((len(idxes), 1)) * self.args.max_nlogp, dtype=torch.float32)
-                if self.args.cuda:
-                    obs = obs.cuda()
-                    actions = actions.cuda()
-                    returns = returns.cuda()
-                    weights = weights.cuda()
-                    max_nlogp = max_nlogp.cuda()
-                # start to next...
-                value, pi = self.network(obs)
-                action_log_probs, dist_entropy = evaluate_actions_sil(pi, actions)
-                action_log_probs = -action_log_probs
-                clipped_nlogp = torch.min(action_log_probs, max_nlogp)
-                # process returns
-                advantages = returns - value
-                advantages = advantages.detach()
-                masks = (advantages.cpu().numpy() > 0).astype(np.float32)
-                # get the num of vaild samples
-                num_valid_samples = np.sum(masks)
-                num_samples = np.max([num_valid_samples, self.args.mini_batch_size])
-                # process the mask
-                masks = torch.tensor(masks, dtype=torch.float32)
-                if self.args.cuda:
-                    masks = masks.cuda()
-                # clip the advantages...
-                clipped_advantages = torch.clamp(advantages, 0, self.args.clip)
-                mean_adv = torch.sum(clipped_advantages) / num_samples 
-                mean_adv = mean_adv.item() 
-                # start to get the action loss...
-                action_loss = torch.sum(clipped_advantages * weights * clipped_nlogp) / num_samples
-                entropy_reg = torch.sum(weights * dist_entropy * masks) / num_samples
-                policy_loss = action_loss - entropy_reg * self.args.entropy_coef
-                # start to process the value loss..
-                # get the value loss
-                delta = torch.clamp(value - returns, -self.args.clip, 0) * masks
-                delta = delta.detach()
-                value_loss = torch.sum(weights * value * delta) / num_samples
-                total_loss = policy_loss + 0.5 * self.args.w_value * value_loss
-                self.optimizer.zero_grad()
-                total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.args.max_grad_norm)
-                self.optimizer.step()
-                # update the priorities
-                self.buffer.update_priorities(idxes, clipped_advantages.squeeze(1).cpu().numpy())
-        return mean_adv, num_valid_samples
-    
-    def generate_traces():
-        raise NotImplementedError
-    
-    # update buffer. # Add single episode to PER Buffer and update stuff
     def update_buffer(self, trajectory):
+        """
+        Update buffer. Add single episode to PER Buffer and update stuff
+        """
         positive_reward = False
         for (ob, a, r, ob_next) in trajectory:
             if r > 0:
@@ -195,8 +201,10 @@ class bw_module:
                 self.total_steps.pop(0)
                 self.total_rewards.pop(0)
     
-    # Add single episode to PER Buffer
-    def add_episode(self, trajectory):-
+    def add_episode(self, trajectory):
+        """
+        Add single episode to PER Buffer
+        """
         obs = []
         actions = []
         rewards = []
@@ -239,7 +247,7 @@ class bw_module:
             batch_size = min(batch_size, len(self.buffer))
             return self.buffer.sample(batch_size, beta=self.args.sil_beta)
         else:
-            return None, None, None, None, None
+            return None, None, None, None, None, None
 
     def discount_with_dones(self, rewards, dones, gamma):
         discounted = []

@@ -7,8 +7,10 @@ from baselines.common.vec_env.vec_frame_stack import VecFrameStack
 import cv2
 import numpy as np
 
-# update the current observation
 def get_tensors(obs):
+    """
+    Update the current observation
+    """
     input_tensor = torch.tensor(np.transpose(obs, (0, 3, 1, 2)), dtype=torch.float32)
     return input_tensor
 

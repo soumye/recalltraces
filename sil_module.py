@@ -4,8 +4,10 @@ import random
 from baselines.common.segment_tree import SumSegmentTree, MinSegmentTree
 from utils import evaluate_actions_sil
 
-# replay buffer...
 class ReplayBuffer:
+    """
+    Replay buffer...
+    """
     def __init__(self, size):
         self._storage = []
         self._maxsize = size
@@ -89,8 +91,10 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         encoded_sample = self._encode_sample(idxes)
         return tuple(list(encoded_sample) + [weights, idxes])
 
-# self-imitation learning
 class sil_module:
+    """
+    Self-imitation learning
+    """
     def __init__(self, network, args, optimizer):
         self.args = args
         self.network = network
@@ -102,8 +106,10 @@ class sil_module:
         self.total_steps = []
         self.total_rewards = []
 
-    # add the batch information into it...
     def step(self, obs, actions, rewards, dones):
+        """
+        Add the batch information into it...
+        """
         for n in range(self.args.num_processes):
             self.running_episodes[n].append([obs[n], actions[n], rewards[n]])
         # to see if can update the episode...
@@ -113,8 +119,10 @@ class sil_module:
                 # Clear the episode buffer
                 self.running_episodes[n] = []
     
-    # train the sil model...
     def train_sil_model(self):
+        """
+        Train the sil model...
+        """
         for n in range(self.args.n_update):
             obs, actions, returns, weights, idxes = self.sample_batch(self.args.batch_size)
             mean_adv, num_valid_samples = 0, 0
@@ -170,8 +178,10 @@ class sil_module:
                 self.buffer.update_priorities(idxes, clipped_advantages.squeeze(1).cpu().numpy())
         return mean_adv, num_valid_samples
     
-    # update buffer. # Add single episode to PER Buffer and update stuff
     def update_buffer(self, trajectory):
+        """
+        Update buffer. # Add single episode to PER Buffer and update stuff
+        """
         positive_reward = False
         for (ob, a, r) in trajectory:
             if r > 0:
@@ -185,8 +195,10 @@ class sil_module:
                 self.total_steps.pop(0)
                 self.total_rewards.pop(0)
     
-    # Add single episode to PER Buffer
     def add_episode(self, trajectory):
+        """
+        Add single episode to PER Buffer
+        """
         obs = []
         actions = []
         rewards = []

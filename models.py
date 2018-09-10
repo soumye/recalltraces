@@ -3,8 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import ipdb
 
-# the convolution layer of deepmind
 class DeepMind(nn.Module):
+    """
+    The convolution layer of deepmind
+    """
     def __init__(self):
         super(DeepMind, self).__init__()
         self.conv1 = nn.Conv2d(4, 32, 8, stride=4)
@@ -33,8 +35,10 @@ class DeepMind(nn.Module):
 
         return x
 
-# in the initial, just the nature CNN
 class Net(nn.Module):
+    """
+    The Policy Network.
+    """
     def __init__(self, num_actions):
         super(Net, self).__init__()
         self.cnn_layer = DeepMind()
@@ -55,8 +59,10 @@ class Net(nn.Module):
 
         return value, pi
 
-# The action generator. P(a_t | s_t+1)
 class ActGen(nn.Module):
+    """
+    The action generator. P(a_t | s_t+1)
+    """
     def __init__(self, num_actions):
         super(ActGen, self).__init__()
         self.cnn_layer = DeepMind()
@@ -70,8 +76,10 @@ class ActGen(nn.Module):
         pi = F.softmax(self.actgen(x), dim=1)
         return pi
 
-# The State Generator. P(Δs_t | a_t, s_t+1).
 class StateGen(nn.Module):
+    """
+    The State Generator. P(Δs_t | a_t, s_t+1). For forward and backward Model
+    """
     def __init__(self, num_actions):
         super(StateGen, self).__init__()
         self.conv1 = nn.Conv2d(4, 32, 8, stride=4)

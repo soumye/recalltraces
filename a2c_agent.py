@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from models import Net, ActGen, StateGen
+from models import Net
 from datetime import datetime
 from utils import select_actions, evaluate_actions, discount_with_dones
 import os
@@ -35,12 +35,14 @@ class a2c_agent:
         # track completed processes
         self.dones = [False for _ in range(self.args.num_processes)]
     
-    # train the network..
     def learn(self):
+        """
+        Train the Agent.
+        """
         if self.args.model_type == 'sil':
             sil_model = sil_module(self.net, self.args, self.optimizer)
         elif self.args.model_type == 'bw':
-            bw_model = bw_module(self.net, self.args, self.optimizer)
+            bw_model = bw_module(self.net, self.args, self.optimizer, self.envs.action_space.n)
         num_updates = self.args.total_frames // (self.args.num_processes * self.args.nsteps)
         # get the reward to calculate other information
         episode_rewards = torch.zeros([self.args.num_processes, 1])
@@ -120,11 +122,12 @@ class a2c_agent:
             # start to update network. Doing A2C Update
             vl, al, ent = self._update_network(mb_obs, mb_rewards, mb_actions)
             
-            # start to update the sil_module
+            # start to update the sil_module or backtracking model
             if self.args.model_type == 'sil':
                 mean_adv, num_samples = sil_model.train_sil_model()
             elif self.args.model_type == 'bw':
                 bw_model.train_bw_model()
+                # pass
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
@@ -133,16 +136,22 @@ class a2c_agent:
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
                 elif self.args.model_type == 'bw':
-                    raise NotImplementedError
+                    print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
+                                'Ent: {:.2f}, Min: {}, Max:{}'.format(\
+                                datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
+                                final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max()))
+                    torch.save(self.net.state_dict(), self.model_path + 'model.pt')
                 else:
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
                             'Ent: {:.2f}, Min: {}, Max:{}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
-    
-    # update_network
+                import ipdb; ipdb.set_trace()
     def _update_network(self, obs, returns, actions):
+        """
+        Learning the Policy Network using Entropy Regularized A2C. 
+        """
         # evaluate the actions
         input_tensor = self._get_tensors(obs)
         values, pi = self.net(input_tensor)
@@ -171,8 +180,10 @@ class a2c_agent:
 
         return value_loss.item(), action_loss.item(), dist_entropy.item()
     
-    # get the tensors...
     def _get_tensors(self, obs):
+        """
+        Get the input tensors...
+        """
         input_tensor = torch.tensor(np.transpose(obs, (0, 3, 1, 2)), dtype=torch.float32)
         if self.args.cuda:
             input_tensor = input_tensor.cuda()
