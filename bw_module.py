@@ -96,11 +96,14 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         return tuple(list(encoded_sample) + [weights, idxes])
 
 class bw_module:
-    def __init__(self, network, args, optimizer, num_actions):
+    def __init__(self, network, args, optimizer, num_actions, obs_state_shape):
         self.args = args
         self.network = network
         self.optimizer = optimizer
         self.num_actions = num_actions
+        self.obs_state_shape = obs_state_shape
+        # obs_state_shape is 84x84x84 but we need ...x4x84x84
+        self.batch_obs_state_shape = (self.args.num_states*self.args.trace_size, self.obs_state_shape[-1] ) + self.obs_state_shape[:-1]
         #Create Backward models
         self.bw_actgen = ActGen(num_actions)
         self.bw_stategen = StateGen(num_actions)
@@ -184,26 +187,41 @@ class bw_module:
                 sorted_indices = value.numpy().reshape(-1).argsort()[-self.args.num_states:][::-1]
                 # Select high value states under currect valuation
                 hv_states = states[sorted_indices.tolist()]
-                for n in range(self.args.num_traces):
-                    # An iteration of sampling recall traces and doing imitation learning
-                    mb_states_next, mb_actions, mb_states_prev = [], [], []
-                    states_next = hv_states
-                    for step in range(self.args.trace_size):
+            for n in range(self.args.num_traces):
+                # An iteration of sampling recall traces and doing imitation learning
+                mb_actions, mb_states_prev = [], []
+                states_next = hv_states
+                for step in range(self.args.trace_size):
+                    with torch.no_grad():
                         pi = self.bw_actgen(states_next)
                         actions = select_actions(pi)
                         mu = self.bw_stategen(states_next, self.indexes_to_one_hot(actions))
                         # s_t = s_t+1 + Δs_t
                         states_prev = states_next + select_state(mu, True)
-                        # Add to list
-                        mb_states_next.append(states_next.numpy())
-                        mb_actions.append(actions.numpy())
-                        mb_states_prev.append(states_prev.numpy())
-                        # Update state
-                        states_next = states_prev
-                    # Begin to do Imitation Learning
-                    mb_states_next = torch.tensor(mb_states_next, dtype=torch.float32)
-                    mb_actions = torch.tensor(mb_actions, dtype=torch.int64).unsqueeze(1)
-                    mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32)
+                    # Add to list
+                    mb_actions.append(actions.numpy())
+                    mb_states_prev.append(states_prev.numpy())
+                    # Update state
+                    states_next = states_prev
+                # Begin to do Imitation Learning
+                mb_actions = torch.tensor(mb_actions, dtype=torch.int64).unsqueeze(1).view(self.args.num_states*self.args.trace_size, -1)
+                mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32).view(self.batch_obs_state_shape)
+                max_nlogp = torch.tensor(np.ones((self.args.num_states*self.args.trace_size, 1)) * self.args.max_nlogp, dtype=torch.float32)
+                import ipdb; ipdb.set_trace()
+                if self.args.cuda:
+                    mb_actions.cuda()
+                    mb_states_prev.cuda()
+                    max_nlogp.cuda()
+                _, pi = self.network(mb_states_prev)
+                action_log_probs, dist_entropy = evaluate_actions_sil(pi, mb_actions)
+                action_log_probs = -action_log_probs
+                clipped_nlogp = torch.min(action_log_probs, max_nlogp)
+                total_loss = (torch.sum(clipped_nlogp) + torch.sum(dist_entropy)) / self.args.num_states*self.args.trace_size
+                # Start to update Policy Network Parameters
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.max_grad_norm)
+                self.optimizer.step()
 
     def step(self, obs, actions, rewards, dones, obs_next):
         """

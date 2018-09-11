@@ -26,7 +26,7 @@ class a2c_agent:
         if not os.path.exists(self.model_path):
             os.mkdir(self.model_path)
         # get the obs..
-        # the shape of the observation batch : 80x84x84x4
+        # the shape of the observation batch : 80x84x84x4. But we feed into the NNS as 4x84x84
         self.batch_ob_shape = (self.args.num_processes * self.args.nsteps,) + self.envs.observation_space.shape
         # Initialize observation seen by the environment. Dim : # of processes(16) X observation_space.shape(84x84x4)
         self.obs = np.zeros((self.args.num_processes,) + self.envs.observation_space.shape, dtype=self.envs.observation_space.dtype.name)
@@ -42,7 +42,7 @@ class a2c_agent:
         if self.args.model_type == 'sil':
             sil_model = sil_module(self.net, self.args, self.optimizer)
         elif self.args.model_type == 'bw':
-            bw_model = bw_module(self.net, self.args, self.optimizer, self.envs.action_space.n)
+            bw_model = bw_module(self.net, self.args, self.optimizer, self.envs.action_space.n, self.envs.observation_space.shape)
         num_updates = self.args.total_frames // (self.args.num_processes * self.args.nsteps)
         # get the reward to calculate other information
         episode_rewards = torch.zeros([self.args.num_processes, 1])
