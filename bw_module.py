@@ -207,7 +207,6 @@ class bw_module:
                 mb_actions = torch.tensor(mb_actions, dtype=torch.int64).unsqueeze(1).view(self.args.num_states*self.args.trace_size, -1)
                 mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32).view(self.batch_obs_state_shape)
                 max_nlogp = torch.tensor(np.ones((self.args.num_states*self.args.trace_size, 1)) * self.args.max_nlogp, dtype=torch.float32)
-                import ipdb; ipdb.set_trace()
                 if self.args.cuda:
                     mb_actions.cuda()
                     mb_states_prev.cuda()
@@ -220,7 +219,7 @@ class bw_module:
                 # Start to update Policy Network Parameters
                 self.optimizer.zero_grad()
                 total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.args.max_grad_norm)
                 self.optimizer.step()
 
     def step(self, obs, actions, rewards, dones, obs_next):
