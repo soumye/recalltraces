@@ -127,6 +127,7 @@ class a2c_agent:
                 mean_adv, num_samples = sil_model.train_sil_model()
             elif self.args.model_type == 'bw':
                 bw_model.train_bw_model()
+                bw_model.train_imitation()
                 # pass
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
@@ -147,7 +148,6 @@ class a2c_agent:
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
-                import ipdb; ipdb.set_trace()
     def _update_network(self, obs, returns, actions):
         """
         Learning the Policy Network using Entropy Regularized A2C. 

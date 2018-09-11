@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from torch.distributions.categorical import Categorical
+from torch.distributions.multivariate_normal import MultivariateNormal
 
 def select_actions(pi, deterministic=False):
     """
@@ -11,6 +12,18 @@ def select_actions(pi, deterministic=False):
         return torch.argmax(pi, dim=1).item()
     else:
         return cate_dist.sample().unsqueeze(-1)
+
+def select_state(mu, deterministic=False):
+    """
+    Select Δs_t from Multivariate normal with mean mu
+    """
+    if deterministic:
+        return mu
+    else:
+        shape = mu.shape
+        mu = mu.view(-1)
+        gauss = MultivariateNormal(mu.view(-1), torch.eye(mu.shape[0]))
+        return gauss.sample().view(shape)
 
 def evaluate_actions(pi, actions):
     """

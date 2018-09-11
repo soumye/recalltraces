@@ -1,10 +1,11 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import numpy as np
 import random
 from models import ActGen, StateGen
 from baselines.common.segment_tree import SumSegmentTree, MinSegmentTree
-from utils import evaluate_actions_sil
+from utils import evaluate_actions_sil, select_actions, select_state
 
 class ReplayBuffer:
     """
@@ -99,6 +100,7 @@ class bw_module:
         self.args = args
         self.network = network
         self.optimizer = optimizer
+        self.num_actions = num_actions
         #Create Backward models
         self.bw_actgen = ActGen(num_actions)
         self.bw_stategen = StateGen(num_actions)
@@ -116,31 +118,28 @@ class bw_module:
     
     def train_bw_model(self):
         """
-        Train the bw_model in 3 Steps
-        1. Sample high value (s,a,r,s) from PER Buffer, Compute bw_model loss & Optimize
-        2. Generate Recall traces from bw_model
-        3. Do imiation learning using those recall traces
+        Train the bw_model. Sample (s,a,r,s) from PER Buffer, Compute bw_model loss & Optimize
+        
         """
-        obs, actions, returns, obs_next, weights, idxes = self.sample_batch(self.args.batch_size)
-        mean_adv, num_valid_samples = 0, 0
+        obs, actions, returns, obs_next, weights, idxes = self.sample_batch(self.args.k_states)
         if obs is not None and obs_next is not None:
             # need to get the masks
             # get basic information of network..
             obs = torch.tensor(obs, dtype=torch.float32)
             obs_next = torch.tensor(obs_next, dtype=torch.float32)
             actions = torch.tensor(actions, dtype=torch.float32).unsqueeze(1)
-            returns = torch.tensor(returns, dtype=torch.float32).unsqueeze(1)
+            # returns = torch.tensor(returns, dtype=torch.float32).unsqueeze(1)
             weights = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
             max_nlogp = torch.tensor(np.ones((len(idxes), 1)) * self.args.max_nlogp, dtype=torch.float32)
             if self.args.cuda:
                 obs = obs.cuda()
                 obs_next = obs_next.cuda()
                 actions = actions.cuda()
-                returns = returns.cuda()
+                # returns = returns.cuda()
                 weights = weights.cuda()
                 max_nlogp = max_nlogp.cuda()
             pi = self.bw_actgen(obs_next)
-            mu = self.bw_stategen(obs_next, actions)
+            mu = self.bw_stategen(obs_next, self.indexes_to_one_hot(actions))
             # Naive losses without weighting
             # loss_actgen = torch.nn.LLLoss(pi, actions.unsqueeze(1))
             # loss_stategen = nn.MSELoss(obs-obs_next, mu)
@@ -149,15 +148,15 @@ class bw_module:
             action_log_probs, dist_entropy = evaluate_actions_sil(pi, actions)
             action_log_probs = -action_log_probs
             clipped_nlogp = torch.min(action_log_probs, max_nlogp)
-            action_loss = torch.sum(weights * clipped_nlogp) / self.args.mini_batch_size
-            entropy_reg = torch.sum(weights*dist_entropy) / self.args.mini_batch_size
+            action_loss = torch.sum(weights * clipped_nlogp) / self.args.k_states
+            entropy_reg = torch.sum(weights*dist_entropy) / self.args.k_states
             loss_actgen = action_loss - entropy_reg * self.args.entropy_coef
-            square_error = ((obs - obs_next - mu)**2).view(self.args.batch_size, -1)
-            loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / self.args.arg.mini_batch_size
+            square_error = ((obs - obs_next - mu)**2).view(self.args.k_states, -1)
+            loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / self.args.k_states
             
             total_loss = loss_actgen + 0.5*loss_stategen
             self.bw_optimizer.zero_grad()
-            total_loss.Backward()
+            total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.bw_params, self.args.max_grad_norm)
             self.bw_optimizer.step()
 
@@ -168,8 +167,43 @@ class bw_module:
                 self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
         return
     
-    def generate_traces():
-        raise NotImplementedError
+    def train_imitation(self):
+        """
+        Do these steps
+        1. Generate Recall traces from bw_model
+        2. Do imiation learning using those recall traces
+        """
+        # maintain list of sampled episodes(batchwise) and append to list. Then do Imitation learning simply
+        _ , _ , _ , states, _ , _ = self.sample_batch(self.args.k_states)
+        if states is not None:
+            with torch.no_grad():
+                states = torch.tensor(states, dtype=torch.float32)
+                if self.args.cuda:
+                    states = states.cuda()
+                value, _ = self.network(states)
+                sorted_indices = value.numpy().reshape(-1).argsort()[-self.args.num_states:][::-1]
+                # Select high value states under currect valuation
+                hv_states = states[sorted_indices.tolist()]
+                for n in range(self.args.num_traces):
+                    # An iteration of sampling recall traces and doing imitation learning
+                    mb_states_next, mb_actions, mb_states_prev = [], [], []
+                    states_next = hv_states
+                    for step in range(self.args.trace_size):
+                        pi = self.bw_actgen(states_next)
+                        actions = select_actions(pi)
+                        mu = self.bw_stategen(states_next, self.indexes_to_one_hot(actions))
+                        # s_t = s_t+1 + Δs_t
+                        states_prev = states_next + select_state(mu, True)
+                        # Add to list
+                        mb_states_next.append(states_next.numpy())
+                        mb_actions.append(actions.numpy())
+                        mb_states_prev.append(states_prev.numpy())
+                        # Update state
+                        states_next = states_prev
+                    # Begin to do Imitation Learning
+                    mb_states_next = torch.tensor(mb_states_next, dtype=torch.float32)
+                    mb_actions = torch.tensor(mb_actions, dtype=torch.int64).unsqueeze(1)
+                    mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32)
 
     def step(self, obs, actions, rewards, dones, obs_next):
         """
@@ -256,3 +290,10 @@ class bw_module:
             r = reward + gamma * r * (1. - done)
             discounted.append(r)
         return discounted[::-1]
+
+    def indexes_to_one_hot(self, indexes):
+        """Converts a vector of indexes to a batch of one-hot vectors. """
+        indexes = indexes.type(torch.int64).view(-1, 1)
+        one_hots = torch.zeros(indexes.shape[0], self.num_actions).scatter_(1, indexes, 1)
+        # one_hots = one_hots.view(*indexes.shape, -1)
+        return one_hots
