@@ -32,9 +32,9 @@ def achieve_arguments():
     # parse.add_argument('--no-sil', action='store_true', help='check if use the sil')
     parse.add_argument('--k-states', type=int, default=64, help='Number of top value states to train Backtracking Model on')
     parse.add_argument('--model-type', type=str, default='sil', help='Which model to use: "vanilla", "sil", "bw"' )
-    parse.add_argument('--num-states', type=int, default=16, help='Number of high value state to actually backtrack on. Must be less than --k-states')
-    parse.add_argument('--num-traces', type=int, default=30, help='Number of traces for each high value state ')
-    parse.add_argument('--trace-size', type=int, default=64, help='Number of steps to backtrack on for a given high value state ie length of trajectory')
+    parse.add_argument('--num-states', type=int, default=5, help='Number of high value state to actually backtrack on. Must be less than --k-states')
+    parse.add_argument('--num-traces', type=int, default=10, help='Number of traces for each high value state ')
+    parse.add_argument('--trace-size', type=int, default=30, help='Number of steps to backtrack on for a given high value state ie length of trajectory')
 
     args = parse.parse_args()
 

@@ -138,17 +138,17 @@ class a2c_agent:
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
                 elif self.args.model_type == 'bw':
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
-                                'Ent: {:.2f}, Min: {}, Max:{}'.format(\
-                                datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
-                                final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max()))
-                    torch.save(self.net.state_dict(), self.model_path + 'model.pt')
+                            'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, S:{}'.format(\
+                            datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
+                            final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
+                            bw_model.num_episodes(), bw_model.num_steps()))
                 else:
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
                             'Ent: {:.2f}, Min: {}, Max:{}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
-                import ipdb; ipdb.set_trace()
+    
     def _update_network(self, obs, returns, actions):
         """
         Learning the Policy Network using Entropy Regularized A2C. 
