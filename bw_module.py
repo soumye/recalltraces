@@ -131,33 +131,34 @@ class bw_module:
             # get basic information of network..
             obs = torch.tensor(obs, dtype=torch.float32)
             obs_next = torch.tensor(obs_next, dtype=torch.float32)
-            actions = torch.tensor(actions, dtype=torch.float32).unsqueeze(1)
+            actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1)
             # returns = torch.tensor(returns, dtype=torch.float32).unsqueeze(1)
-            weights = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
-            max_nlogp = torch.tensor(np.ones((len(idxes), 1)) * self.args.max_nlogp, dtype=torch.float32)
+            # weights = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
+            # max_nlogp = torch.tensor(np.ones((len(idxes), 1)) * self.args.max_nlogp, dtype=torch.float32)
             if self.args.cuda:
                 obs = obs.cuda()
                 obs_next = obs_next.cuda()
                 actions = actions.cuda()
                 # returns = returns.cuda()
-                weights = weights.cuda()
-                max_nlogp = max_nlogp.cuda()
+                # weights = weights.cuda()
+                # max_nlogp = max_nlogp.cuda()
             pi = self.bw_actgen(obs_next)
-            a = self.indexes_to_one_hot(actions)
-            mu = self.bw_stategen(obs_next, a)
+            mu = self.bw_stategen(obs_next, self.indexes_to_one_hot(actions))
             # Naive losses without weighting
-            # loss_actgen = torch.nn.LLLoss(pi, actions.unsqueeze(1))
-            # loss_stategen = nn.MSELoss(obs-obs_next, mu)
+            criterion1 = torch.nn.NLLLoss()
+            criterion2 = nn.MSELoss()
+            loss_actgen = criterion1(pi, actions.squeeze(1))
+            loss_stategen = criterion2(obs-obs_next, mu)
 
             # Losses with weightings and entropy regularization
-            action_log_probs, dist_entropy = evaluate_actions_sil(pi, actions)
-            action_log_probs = -action_log_probs
-            clipped_nlogp = torch.min(action_log_probs, max_nlogp)
-            action_loss = torch.sum(weights * clipped_nlogp) / batch_size
-            entropy_reg = torch.sum(weights*dist_entropy) / batch_size
-            loss_actgen = action_loss - entropy_reg * self.args.entropy_coef
-            square_error = ((obs - obs_next - mu)**2).view(batch_size , -1)
-            loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / batch_size
+            # action_log_probs, dist_entropy = evaluate_actions_sil(pi, actions)
+            # action_log_probs = -action_log_probs
+            # clipped_nlogp = torch.min(action_log_probs, max_nlogp)
+            # action_loss = torch.sum(weights * clipped_nlogp) / batch_size
+            # entropy_reg = torch.sum(weights*dist_entropy) / batch_size
+            # loss_actgen = action_loss - entropy_reg * self.args.entropy_coef
+            # square_error = ((obs - obs_next - mu)**2).view(batch_size , -1)
+            # loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / batch_size
 
             total_loss = loss_actgen + 0.5*loss_stategen
             self.bw_optimizer.zero_grad()
@@ -179,7 +180,7 @@ class bw_module:
         2. Do imiation learning using those recall traces
         """
         # maintain list of sampled episodes(batchwise) and append to list. Then do Imitation learning simply
-        _ , _ , _ , states, _ , _ = self.sample_batch(self.args.num_states*5)
+        _ , _ , _ , states, _ , _ = self.sample_batch(self.args.num_states*3)
         if states is not None:
             with torch.no_grad():
                 states = torch.tensor(states, dtype=torch.float32)
@@ -189,6 +190,7 @@ class bw_module:
                 sorted_indices = value.cpu().numpy().reshape(-1).argsort()[-self.args.num_states:][::-1]
                 # Select high value states under currect valuation
                 hv_states = states[sorted_indices.tolist()]
+            
             for n in range(self.args.num_traces):
                 # An iteration of sampling recall traces and doing imitation learning
                 mb_actions, mb_states_prev = [], []
@@ -200,25 +202,27 @@ class bw_module:
                         mu = self.bw_stategen(states_next, self.indexes_to_one_hot(actions))
                         # s_t = s_t+1 + Δs_t
                         states_prev = states_next + select_state(mu, True)
+                        states_next = states_prev
                     # Add to list
                     mb_actions.append(actions.cpu().numpy())
                     mb_states_prev.append(states_prev.cpu().numpy())
                     # Update state
-                    states_next = states_prev
                 # Begin to do Imitation Learning
                 mb_actions = torch.tensor(mb_actions, dtype=torch.int64).unsqueeze(1).view(self.args.num_states*self.args.trace_size, -1)
                 mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32).view(self.batch_obs_state_shape)
-                max_nlogp = torch.tensor(np.ones((self.args.num_states*self.args.trace_size, 1)) * self.args.max_nlogp, dtype=torch.float32)
+                # max_nlogp = torch.tensor(np.ones((self.args.num_states*self.args.trace_size, 1)) * self.args.max_nlogp, dtype=torch.float32)
                 if self.args.cuda:
                     mb_actions = mb_actions.cuda()
                     mb_states_prev = mb_states_prev.cuda()
-                    max_nlogp = max_nlogp.cuda()
+                    # max_nlogp = max_nlogp.cuda()
                 _, pi = self.network(mb_states_prev)
-                action_log_probs, dist_entropy = evaluate_actions_sil(pi, mb_actions)
-                action_log_probs = -action_log_probs
-                clipped_nlogp = torch.min(action_log_probs, max_nlogp)
-                total_loss = (torch.sum(clipped_nlogp) -self.args.entropy_coef*torch.sum(dist_entropy)) / self.args.num_states*self.args.trace_size
+                # action_log_probs, dist_entropy = evaluate_actions_sil(pi, mb_actions)
+                # action_log_probs = -action_log_probs
+                # clipped_nlogp = torch.min(action_log_probs, max_nlogp)
+                # total_loss = (torch.sum(clipped_nlogp) -self.args.entropy_coef*torch.sum(dist_entropy)) / self.args.num_states*self.args.trace_size
                 # Start to update Policy Network Parameters
+                criterion =  torch.nn.NLLLoss()
+                total_loss = criterion(pi, mb_actions.squeeze(1))
                 self.optimizer.zero_grad()
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.args.max_grad_norm)

@@ -51,7 +51,7 @@ class a2c_agent:
         for update in range(num_updates):
             # mb_obs, mb_rewards, mb_actions, mb_dones, mb_obs_next = [], [], [], [], []
             mb_obs, mb_rewards, mb_actions, mb_dones = [], [], [], []
-            print("collection number", update, " started")
+            # print("collection number", update, " started")
             for step in range(self.args.nsteps):
                 # Executing the action after seeing the observation
                 with torch.no_grad():
@@ -61,9 +61,9 @@ class a2c_agent:
                 actions = select_actions(pi)
                 cpu_actions = actions.squeeze(1).cpu().numpy()
                 # step in gym batched environment
-                print("step in env")
+                # print("step in env")
                 obs, rewards, dones, _ = self.envs.step(cpu_actions)
-                print("end in env")
+                # print("end in env")
                 # start to store the information
                 mb_obs.append(np.copy(self.obs))
                 mb_actions.append(cpu_actions)
@@ -123,16 +123,16 @@ class a2c_agent:
             mb_rewards = mb_rewards.flatten()
             mb_actions = mb_actions.flatten()
             # start to update network. Doing A2C Update
-            print("doing a2c update")
+            # print("doing a2c update")
             vl, al, ent = self._update_network(mb_obs, mb_rewards, mb_actions)
 
             # start to update the sil_module or backtracking model
             if self.args.model_type == 'sil':
                 mean_adv, num_samples = sil_model.train_sil_model()
             elif self.args.model_type == 'bw':
-                print("train bw model")
+                # print("train bw model")
                 bw_model.train_bw_model()
-                print("train imitation")
+                # print("train imitation")
                 bw_model.train_imitation()
 
             if update % self.args.log_interval == 0:
