@@ -18,7 +18,7 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self._storage)
-    
+
     def add(self, obs_t, action, R, obs_next):
         data = (obs_t, action, R, obs_next)
         if self._next_idx >= len(self._storage):
@@ -30,7 +30,7 @@ class ReplayBuffer:
     def sample(self, batch_size):
         idxes = [random.randint(0, len(self._storage) - 1) for _ in range(batch_size)]
         return self._encode_sample(idxes)
-    
+
     def _encode_sample(self, idxes):
         obses_t, actions, returns, obses_next = [], [], [], []
         for i in idxes:
@@ -118,13 +118,14 @@ class bw_module:
         # some other parameters...
         self.total_steps = []
         self.total_rewards = []
-    
+
     def train_bw_model(self):
         """
         Train the bw_model. Sample (s,a,r,s) from PER Buffer, Compute bw_model loss & Optimize
-        
+
         """
         obs, actions, returns, obs_next, weights, idxes = self.sample_batch(self.args.k_states)
+        batch_size = min(self.args.k_states, len(self.buffer))
         if obs is not None and obs_next is not None:
             # need to get the masks
             # get basic information of network..
@@ -151,12 +152,12 @@ class bw_module:
             action_log_probs, dist_entropy = evaluate_actions_sil(pi, actions)
             action_log_probs = -action_log_probs
             clipped_nlogp = torch.min(action_log_probs, max_nlogp)
-            action_loss = torch.sum(weights * clipped_nlogp) / self.args.k_states
-            entropy_reg = torch.sum(weights*dist_entropy) / self.args.k_states
+            action_loss = torch.sum(weights * clipped_nlogp) / batch_size
+            entropy_reg = torch.sum(weights*dist_entropy) / batch_size
             loss_actgen = action_loss - entropy_reg * self.args.entropy_coef
-            square_error = ((obs - obs_next - mu)**2).view(self.args.k_states, -1)
-            loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / self.args.k_states
-            
+            square_error = ((obs - obs_next - mu)**2).view(batch_size , -1)
+            loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / batch_size
+
             total_loss = loss_actgen + 0.5*loss_stategen
             self.bw_optimizer.zero_grad()
             total_loss.backward()
@@ -169,7 +170,7 @@ class bw_module:
                 value = torch.clamp(value, min=0)
                 self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
         return
-    
+
     def train_imitation(self):
         """
         Do these steps
@@ -177,14 +178,14 @@ class bw_module:
         2. Do imiation learning using those recall traces
         """
         # maintain list of sampled episodes(batchwise) and append to list. Then do Imitation learning simply
-        _ , _ , _ , states, _ , _ = self.sample_batch(self.args.k_states)
+        _ , _ , _ , states, _ , _ = self.sample_batch(self.args.num_states*5)
         if states is not None:
             with torch.no_grad():
                 states = torch.tensor(states, dtype=torch.float32)
                 if self.args.cuda:
                     states = states.cuda()
                 value, _ = self.network(states)
-                sorted_indices = value.numpy().reshape(-1).argsort()[-self.args.num_states:][::-1]
+                sorted_indices = value.cpu().numpy().reshape(-1).argsort()[-self.args.num_states:][::-1]
                 # Select high value states under currect valuation
                 hv_states = states[sorted_indices.tolist()]
             for n in range(self.args.num_traces):
@@ -199,8 +200,8 @@ class bw_module:
                         # s_t = s_t+1 + Δs_t
                         states_prev = states_next + select_state(mu, True)
                     # Add to list
-                    mb_actions.append(actions.numpy())
-                    mb_states_prev.append(states_prev.numpy())
+                    mb_actions.append(actions.cpu().numpy())
+                    mb_states_prev.append(states_prev.cpu().numpy())
                     # Update state
                     states_next = states_prev
                 # Begin to do Imitation Learning
@@ -208,9 +209,9 @@ class bw_module:
                 mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32).view(self.batch_obs_state_shape)
                 max_nlogp = torch.tensor(np.ones((self.args.num_states*self.args.trace_size, 1)) * self.args.max_nlogp, dtype=torch.float32)
                 if self.args.cuda:
-                    mb_actions.cuda()
-                    mb_states_prev.cuda()
-                    max_nlogp.cuda()
+                    mb_actions = mb_actions.cuda()
+                    mb_states_prev = mb_states_prev.cuda()
+                    max_nlogp = max_nlogp.cuda()
                 _, pi = self.network(mb_states_prev)
                 action_log_probs, dist_entropy = evaluate_actions_sil(pi, mb_actions)
                 action_log_probs = -action_log_probs
@@ -234,7 +235,7 @@ class bw_module:
                 self.update_buffer(self.running_episodes[n])
                 # Clear the episode buffer
                 self.running_episodes[n] = []
-    
+
     def update_buffer(self, trajectory):
         """
         Update buffer. Add single episode to PER Buffer and update stuff
@@ -251,7 +252,7 @@ class bw_module:
             while np.sum(self.total_steps) > self.args.capacity and len(self.total_steps) > 1:
                 self.total_steps.pop(0)
                 self.total_rewards.pop(0)
-    
+
     def add_episode(self, trajectory):
         """
         Add single episode to PER Buffer
@@ -286,7 +287,7 @@ class bw_module:
         if len(self.total_rewards) > 0:
             return np.max(self.total_rewards)
         return 0
-    
+
     def num_episodes(self):
         return len(self.total_rewards)
 
@@ -311,6 +312,9 @@ class bw_module:
     def indexes_to_one_hot(self, indexes):
         """Converts a vector of indexes to a batch of one-hot vectors. """
         indexes = indexes.type(torch.int64).view(-1, 1)
-        one_hots = torch.zeros(indexes.shape[0], self.num_actions).scatter_(1, indexes, 1)
+        one_hots = torch.zeros(indexes.shape[0], self.num_actions)
         # one_hots = one_hots.view(*indexes.shape, -1)
+        if self.args.cuda:
+            one_hots = one_hots.cuda()
+        one_hots = one_hots.scatter_(1, indexes, 1)
         return one_hots
