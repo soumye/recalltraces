@@ -131,9 +131,9 @@ class a2c_agent:
                 mean_adv, num_samples = sil_model.train_sil_model()
             elif self.args.model_type == 'bw':
                 # print("train bw model")
-                bw_model.train_bw_model()
+                l_actgen, l_stategen = bw_model.train_bw_model(update)
                 # print("train imitation")
-                bw_model.train_imitation()
+                l_imi = bw_model.train_imitation(update)
 
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
@@ -143,11 +143,11 @@ class a2c_agent:
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
                 elif self.args.model_type == 'bw':
-                    print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
-                            'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, S:{}'.format(\
+                    print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.4f}, PL: {:.4f},' \
+                            'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, S:{}, AG:{:.4f} , SG:{:.4f}, IMI:{:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
-                            bw_model.num_episodes(), bw_model.num_steps()))
+                            bw_model.num_episodes(), bw_model.num_steps(), l_actgen, l_stategen, l_imi))
                 else:
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
                             'Ent: {:.2f}, Min: {}, Max:{}'.format(\

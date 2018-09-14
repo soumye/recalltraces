@@ -1,4 +1,5 @@
 import numpy as np
+import ipdb
 import torch
 import torch.nn as nn
 import numpy as np
@@ -119,7 +120,7 @@ class bw_module:
         self.total_steps = []
         self.total_rewards = []
 
-    def train_bw_model(self):
+    def train_bw_model(self, update):
         """
         Train the bw_model. Sample (s,a,r,s) from PER Buffer, Compute bw_model loss & Optimize
 
@@ -145,11 +146,12 @@ class bw_module:
             pi = self.bw_actgen(obs_next)
             mu = self.bw_stategen(obs_next, self.indexes_to_one_hot(actions))
             # Naive losses without weighting
+            #if update % self.args.log_interval == 0:
+                #ipdb.set_trace()
             criterion1 = torch.nn.NLLLoss()
             criterion2 = nn.MSELoss()
-            loss_actgen = criterion1(pi, actions.squeeze(1))
+            loss_actgen = criterion1(torch.log(pi), actions.squeeze(1))
             loss_stategen = criterion2(obs-obs_next, mu)
-
             # Losses with weightings and entropy regularization
             # action_log_probs, dist_entropy = evaluate_actions_sil(pi, actions)
             # action_log_probs = -action_log_probs
@@ -160,7 +162,7 @@ class bw_module:
             # square_error = ((obs - obs_next - mu)**2).view(batch_size , -1)
             # loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / batch_size
 
-            total_loss = loss_actgen + 0.5*loss_stategen
+            total_loss = loss_actgen + 1e-8*loss_stategen
             self.bw_optimizer.zero_grad()
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.bw_params, self.args.max_grad_norm)
@@ -171,9 +173,11 @@ class bw_module:
                 value, _ = self.network(obs_next)
             value = torch.clamp(value, min=0)
             self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
-        return
+            return loss_actgen, 1e-8*loss_stategen
+        else:
+            return None, None
 
-    def train_imitation(self):
+    def train_imitation(self, update):
         """
         Do these steps
         1. Generate Recall traces from bw_model
@@ -190,7 +194,7 @@ class bw_module:
                 sorted_indices = value.cpu().numpy().reshape(-1).argsort()[-self.args.num_states:][::-1]
                 # Select high value states under currect valuation
                 hv_states = states[sorted_indices.tolist()]
-            
+
             for n in range(self.args.num_traces):
                 # An iteration of sampling recall traces and doing imitation learning
                 mb_actions, mb_states_prev = [], []
@@ -221,12 +225,15 @@ class bw_module:
                 # clipped_nlogp = torch.min(action_log_probs, max_nlogp)
                 # total_loss = (torch.sum(clipped_nlogp) -self.args.entropy_coef*torch.sum(dist_entropy)) / self.args.num_states*self.args.trace_size
                 # Start to update Policy Network Parameters
+                #if update % self.args.log_interval == 0:
+                    #ipdb.set_trace()
                 criterion =  torch.nn.NLLLoss()
-                total_loss = criterion(pi, mb_actions.squeeze(1))
+                total_loss = criterion(torch.log(pi), mb_actions.squeeze(1))
                 self.optimizer.zero_grad()
                 total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.args.max_grad_norm)
                 self.optimizer.step()
+                return total_loss
 
     def step(self, obs, actions, rewards, dones, obs_next):
         """
