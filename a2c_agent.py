@@ -142,7 +142,7 @@ class a2c_agent:
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
-                elif self.args.model_type == 'bw':
+                elif (self.args.model_type == 'bw') and (update >= self.args.log_interval):
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.4f}, PL: {:.4f},' \
                             'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, S:{}, AG:{:.4f} , SG:{:.4f}, IMI:{:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\

@@ -162,7 +162,7 @@ class bw_module:
             # square_error = ((obs - obs_next - mu)**2).view(batch_size , -1)
             # loss_stategen = torch.sum(torch.sum((square_error),1)*weights) / batch_size
 
-            total_loss = loss_actgen + 1e-8*loss_stategen
+            total_loss = loss_actgen + self.args.state_coef*loss_stategen
             self.bw_optimizer.zero_grad()
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.bw_params, self.args.max_grad_norm)
@@ -173,7 +173,7 @@ class bw_module:
                 value, _ = self.network(obs_next)
             value = torch.clamp(value, min=0)
             self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
-            return loss_actgen, 1e-8*loss_stategen
+            return loss_actgen, self.args.state_coef*loss_stategen
         else:
             return None, None
 
