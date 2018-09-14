@@ -51,7 +51,6 @@ class a2c_agent:
         for update in range(num_updates):
             # mb_obs, mb_rewards, mb_actions, mb_dones, mb_obs_next = [], [], [], [], []
             mb_obs, mb_rewards, mb_actions, mb_dones = [], [], [], []
-            # print("collection number", update, " started")
             for step in range(self.args.nsteps):
                 # Executing the action after seeing the observation
                 with torch.no_grad():
@@ -73,7 +72,6 @@ class a2c_agent:
                 rewards = np.sign(rewards)
                 # start to store the rewards
                 mb_rewards.append(rewards)
-                # mb_obs_next.append(np.copy(obs))
                 self.dones = dones
                 for n, done in enumerate(dones):
                     if done:
@@ -142,7 +140,7 @@ class a2c_agent:
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
-                elif (self.args.model_type == 'bw') and (update >= self.args.log_interval):
+                elif (self.args.model_type == 'bw') and (l_actgen and  l_stategen and l_imi) is not None :
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.4f}, PL: {:.4f},' \
                             'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, S:{}, AG:{:.4f} , SG:{:.4f}, IMI:{:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
@@ -160,7 +158,6 @@ class a2c_agent:
         Learning the Policy Network using Entropy Regularized A2C.
         """
         # evaluate the actions
-
         input_tensor = self._get_tensors(obs)
         values, pi = self.net(input_tensor)
         # define the tensor of actions, returns
