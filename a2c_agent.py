@@ -1,4 +1,5 @@
 import numpy as np
+import ipdb
 import torch
 from models import Net
 from datetime import datetime
@@ -7,7 +8,6 @@ import os
 from sil_module import sil_module
 from bw_module import bw_module
 import copy
-import ipdb
 
 class a2c_agent:
     def __init__(self, envs, args):
@@ -34,7 +34,7 @@ class a2c_agent:
         self.obs[:] = self.envs.reset()
         # track completed processes
         self.dones = [False for _ in range(self.args.num_processes)]
-    
+
     def learn(self):
         """
         Train the Agent.
@@ -51,6 +51,7 @@ class a2c_agent:
         for update in range(num_updates):
             # mb_obs, mb_rewards, mb_actions, mb_dones, mb_obs_next = [], [], [], [], []
             mb_obs, mb_rewards, mb_actions, mb_dones = [], [], [], []
+            print("collection number", update, " started")
             for step in range(self.args.nsteps):
                 # Executing the action after seeing the observation
                 with torch.no_grad():
@@ -60,7 +61,9 @@ class a2c_agent:
                 actions = select_actions(pi)
                 cpu_actions = actions.squeeze(1).cpu().numpy()
                 # step in gym batched environment
+                print("step in env")
                 obs, rewards, dones, _ = self.envs.step(cpu_actions)
+                print("end in env")
                 # start to store the information
                 mb_obs.append(np.copy(self.obs))
                 mb_actions.append(cpu_actions)
@@ -106,29 +109,32 @@ class a2c_agent:
             with torch.no_grad():
                 input_tensor = self._get_tensors(self.obs)
                 last_values, _ = self.net(input_tensor)
-            # compute returns via 5-step lookahead. 
-            for n, (rewards, dones, value) in enumerate(zip(mb_rewards, mb_dones, last_values.detach().cpu().numpy().squeeze())):
+            # compute returns via 5-step lookahead.
+            for n, (rewards, done_, value) in enumerate(zip(mb_rewards, mb_dones, last_values.detach().cpu().numpy().squeeze())):
                 rewards = rewards.tolist()
-                dones = dones.tolist()
-                if dones[-1] == 0:
+                done_ = done_.tolist()
+                if done_[-1] == 0:
                     # Passed in [value] for the estimated V(curr_obs) in TD Learning
-                    rewards = discount_with_dones(rewards+[value], dones+[0], self.args.gamma)[:-1]
+                    rewards = discount_with_dones(rewards+[value], done_ + [0], self.args.gamma)[:-1]
                 else:
-                    rewards = discount_with_dones(rewards, dones, self.args.gamma)
+                    rewards = discount_with_dones(rewards, done_, self.args.gamma)
                 mb_rewards[n] = rewards
             # Convert 16 x 5 points to 80 flat points
             mb_rewards = mb_rewards.flatten()
             mb_actions = mb_actions.flatten()
             # start to update network. Doing A2C Update
+            print("doing a2c update")
             vl, al, ent = self._update_network(mb_obs, mb_rewards, mb_actions)
-            
+
             # start to update the sil_module or backtracking model
             if self.args.model_type == 'sil':
                 mean_adv, num_samples = sil_model.train_sil_model()
             elif self.args.model_type == 'bw':
+                print("train bw model")
                 bw_model.train_bw_model()
+                print("train imitation")
                 bw_model.train_imitation()
-            
+
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
@@ -148,12 +154,13 @@ class a2c_agent:
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
-    
+
     def _update_network(self, obs, returns, actions):
         """
-        Learning the Policy Network using Entropy Regularized A2C. 
+        Learning the Policy Network using Entropy Regularized A2C.
         """
         # evaluate the actions
+
         input_tensor = self._get_tensors(obs)
         values, pi = self.net(input_tensor)
         # define the tensor of actions, returns
@@ -178,9 +185,8 @@ class a2c_agent:
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.max_grad_norm)
         self.optimizer.step()
-
         return value_loss.item(), action_loss.item(), dist_entropy.item()
-    
+
     def _get_tensors(self, obs):
         """
         Get the input tensors...

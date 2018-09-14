@@ -114,5 +114,8 @@ logs/
 
 *.csv
 *.txt
-
+# MILA Stuff
 core
+*.sh
+*debug.py
+slurm*

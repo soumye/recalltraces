@@ -143,7 +143,8 @@ class bw_module:
                 weights = weights.cuda()
                 max_nlogp = max_nlogp.cuda()
             pi = self.bw_actgen(obs_next)
-            mu = self.bw_stategen(obs_next, self.indexes_to_one_hot(actions))
+            a = self.indexes_to_one_hot(actions)
+            mu = self.bw_stategen(obs_next, a)
             # Naive losses without weighting
             # loss_actgen = torch.nn.LLLoss(pi, actions.unsqueeze(1))
             # loss_stategen = nn.MSELoss(obs-obs_next, mu)
@@ -167,8 +168,8 @@ class bw_module:
             #Now updating the priorities in the PER Buffer. Use Net Value estimates
             with torch.no_grad():
                 value, _ = self.network(obs_next)
-                value = torch.clamp(value, min=0)
-                self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
+            value = torch.clamp(value, min=0)
+            self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
         return
 
     def train_imitation(self):
@@ -216,7 +217,7 @@ class bw_module:
                 action_log_probs, dist_entropy = evaluate_actions_sil(pi, mb_actions)
                 action_log_probs = -action_log_probs
                 clipped_nlogp = torch.min(action_log_probs, max_nlogp)
-                total_loss = (torch.sum(clipped_nlogp) + torch.sum(dist_entropy)) / self.args.num_states*self.args.trace_size
+                total_loss = (torch.sum(clipped_nlogp) -self.args.entropy_coef*torch.sum(dist_entropy)) / self.args.num_states*self.args.trace_size
                 # Start to update Policy Network Parameters
                 self.optimizer.zero_grad()
                 total_loss.backward()
