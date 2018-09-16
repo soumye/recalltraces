@@ -51,7 +51,6 @@ class a2c_agent:
         for update in range(num_updates):
             # mb_obs, mb_rewards, mb_actions, mb_dones, mb_obs_next = [], [], [], [], []
             mb_obs, mb_rewards, mb_actions, mb_dones = [], [], [], []
-            print("collection number", update, " started")
             for step in range(self.args.nsteps):
                 # Executing the action after seeing the observation
                 with torch.no_grad():
@@ -61,9 +60,9 @@ class a2c_agent:
                 actions = select_actions(pi)
                 cpu_actions = actions.squeeze(1).cpu().numpy()
                 # step in gym batched environment
-                print("step in env")
+                # print("step in env")
                 obs, rewards, dones, _ = self.envs.step(cpu_actions)
-                print("end in env")
+                # print("end in env")
                 # start to store the information
                 mb_obs.append(np.copy(self.obs))
                 mb_actions.append(cpu_actions)
@@ -73,7 +72,6 @@ class a2c_agent:
                 rewards = np.sign(rewards)
                 # start to store the rewards
                 mb_rewards.append(rewards)
-                # mb_obs_next.append(np.copy(obs))
                 self.dones = dones
                 for n, done in enumerate(dones):
                     if done:
@@ -123,17 +121,17 @@ class a2c_agent:
             mb_rewards = mb_rewards.flatten()
             mb_actions = mb_actions.flatten()
             # start to update network. Doing A2C Update
-            print("doing a2c update")
+            # print("doing a2c update")
             vl, al, ent = self._update_network(mb_obs, mb_rewards, mb_actions)
 
             # start to update the sil_module or backtracking model
             if self.args.model_type == 'sil':
                 mean_adv, num_samples = sil_model.train_sil_model()
             elif self.args.model_type == 'bw':
-                print("train bw model")
-                bw_model.train_bw_model()
-                print("train imitation")
-                bw_model.train_imitation()
+                # print("train bw model")
+                l_actgen, l_stategen = bw_model.train_bw_model(update)
+                # print("train imitation")
+                l_imi = bw_model.train_imitation(update)
 
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
@@ -142,12 +140,12 @@ class a2c_agent:
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
-                elif self.args.model_type == 'bw':
-                    print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
-                            'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, S:{}'.format(\
+                elif (self.args.model_type == 'bw') and (l_actgen and  l_stategen and l_imi) is not None :
+                    print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.4f}, PL: {:.4f},' \
+                            'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, S:{}, AG:{:.4f} , SG:{:.4f}, IMI:{:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
-                            bw_model.num_episodes(), bw_model.num_steps()))
+                            bw_model.num_episodes(), bw_model.num_steps(), l_actgen, l_stategen, l_imi))
                 else:
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
                             'Ent: {:.2f}, Min: {}, Max:{}'.format(\
@@ -160,7 +158,6 @@ class a2c_agent:
         Learning the Policy Network using Entropy Regularized A2C.
         """
         # evaluate the actions
-
         input_tensor = self._get_tensors(obs)
         values, pi = self.net(input_tensor)
         # define the tensor of actions, returns
