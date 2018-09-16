@@ -145,7 +145,7 @@ class bw_module:
                     max_nlogp = max_nlogp.cuda()
             pi = self.bw_actgen(obs_next)
             mu = self.bw_stategen(obs_next, self.indexes_to_one_hot(actions))
-            
+
             if self.args.per_weight:
                 # Losses with weightings and entropy regularization
                 action_log_probs, dist_entropy = evaluate_actions_sil(pi, actions)
@@ -154,7 +154,7 @@ class bw_module:
                 action_loss = torch.mean(weights * clipped_nlogp)
                 entropy_reg = torch.sum(weights*dist_entropy) / batch_size
                 loss_actgen = action_loss - entropy_reg * self.args.entropy_coef
-                square_error = ((obqs - obs_next - mu)**2).view(batch_size , -1)
+                square_error = ((obs - obs_next - mu)**2).view(batch_size , -1)
                 loss_stategen = torch.mean(torch.mean((square_error),1)*weights)
             else:
                 # Naive losses without weighting
@@ -162,7 +162,7 @@ class bw_module:
                 criterion2 = nn.MSELoss()
                 loss_actgen = criterion1(torch.log(pi), actions.squeeze(1))
                 loss_stategen = criterion2(obs-obs_next, mu)
-            
+
             total_loss = loss_actgen + self.args.state_coef*loss_stategen
             self.bw_optimizer.zero_grad()
             total_loss.backward()
@@ -217,7 +217,7 @@ class bw_module:
                 mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32).view(self.batch_obs_state_shape)
                 if self.args.per_weight:
                     max_nlogp = torch.tensor(np.ones((self.args.num_states*self.args.trace_size, 1)) * self.args.max_nlogp, dtype=torch.float32)
-                
+
                 if self.args.cuda:
                     mb_actions = mb_actions.cuda()
                     mb_states_prev = mb_states_prev.cuda()
@@ -225,7 +225,7 @@ class bw_module:
                         max_nlogp = max_nlogp.cuda()
                 # Pass through network
                 _, pi = self.network(mb_states_prev)
-                
+
                 if self.args.per_weight:
                     action_log_probs, dist_entropy = evaluate_actions_sil(pi, mb_actions)
                     action_log_probs = -action_log_probs

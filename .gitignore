@@ -118,4 +118,6 @@ logs/
 core
 *.sh
 *debug.py
+scripts/*
+oldlogs/*
 slurm*
