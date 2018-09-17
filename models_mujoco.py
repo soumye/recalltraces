@@ -31,12 +31,12 @@ class Net(nn.Module):
         nn.init.constant_(self.actor_sigma.bias.data, 0)
 
     def forward(self, inputs):
-        x = F.tanh(self.layer1(inputs))
-        x = F.tanh(self.layer2(x))
+        x = torch.tanh(self.layer1(inputs))
+        x = torch.tanh(self.layer2(x))
         value = self.critic(x)
         a_mu = self.actor_mu(x)
         a_sigma = self.actor_sigma(x)
-        return value, a_mu, a_sigma
+        return value, a_mu, a_sigma**2
 
 class ActGen(nn.Module):
     """
@@ -58,8 +58,8 @@ class ActGen(nn.Module):
         nn.init.constant_(self.actor.bias.data, 0)
 
     def forward(self, inputs):
-        x = F.tanh(self.layer1(inputs))
-        x = F.tanh(self.layer2(x))
+        x = torch.tanh(self.layer1(inputs))
+        x = torch.tanh(self.layer2(x))
         return self.actor(x)
 
 class StateGen(nn.Module):
@@ -89,5 +89,4 @@ class StateGen(nn.Module):
         x = torch.cat((obs, actions),1)
         x = F.relu(self.layer1(x))
         x = F.relu(self.layer2(x))
-        return self.mu(x), self.sigma(x)
-
+        return self.mu(x), self.sigma(x)**2

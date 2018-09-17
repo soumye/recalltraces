@@ -14,7 +14,7 @@ class a2c_agent:
         self.envs = envs
         self.args = args
         # define the network. Gives V(s) and π(a|S)
-        self.net = Net(self.envs.action_space)
+        self.net = Net(self.envs.observation_space,self.envs.action_space)
         if self.args.cuda:
             self.net.cuda()
         # define the optimizer
@@ -105,7 +105,7 @@ class a2c_agent:
             mb_dones = mb_dones[:, 1:]
             with torch.no_grad():
                 input_tensor = self._get_tensors(self.obs)
-                last_values, _ = self.net(input_tensor)
+                last_values, _ , _ = self.net(input_tensor)
             # compute returns via 5-step lookahead.
             for n, (rewards, done_, value) in enumerate(zip(mb_rewards, mb_dones, last_values.detach().cpu().numpy().squeeze())):
                 rewards = rewards.tolist()
@@ -117,11 +117,11 @@ class a2c_agent:
                     rewards = discount_with_dones(rewards, done_, self.args.gamma)
                 mb_rewards[n] = rewards
             # Convert 16 x 5 points to 80 flat points
-            mb_obs = mb_obs.flatten()
+            mb_obs = mb_obs.reshape(self.args.num_processes * self.args.nsteps,-1)
             mb_rewards = mb_rewards.flatten()
-            mb_actions = mb_actions.flatten()
+            mb_actions = mb_actions.reshape(self.args.num_processes * self.args.nsteps,-1)
             # start to update network. Doing A2C Update
-            vl, al, ent = self._update_network(mb_obs, mb_rewards, mb_actions)
+            vl, al, adv = self._update_network(mb_obs, mb_rewards, mb_actions)
 
             # start to update the sil_module or backtracking model
             if self.args.model_type == 'sil':
@@ -147,9 +147,9 @@ class a2c_agent:
                             bw_model.num_episodes(), bw_model.num_steps(), l_actgen, l_stategen, l_imi))
                 else:
                     print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
-                            'Ent: {:.2f}, Min: {}, Max:{}'.format(\
+                            'Adv:{:.3f}, Min: {}, Max:{}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
-                            final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max()))
+                            final_rewards.mean(), vl, al,adv, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
 
     def _update_network(self, obs, returns, actions):
@@ -160,14 +160,15 @@ class a2c_agent:
         input_tensor = self._get_tensors(obs)
         values, mu, sigma = self.net(input_tensor)
         # define the tensor of actions, returns
-        # convert to 2D tensor of 80x1
-        returns = torch.tensor(returns, dtype=torch.float32).unsqueeze(1)
-        actions = torch.tensor(actions, dtype=torch.float32).unsqueeze(1)
+        # convert to 2D tensor of (16*5=80)x1
+        returns = torch.tensor(returns, dtype=torch.float32)
+        actions = torch.tensor(actions, dtype=torch.float32)
         if self.args.cuda:
             returns = returns.cuda()
             actions = actions.cuda()
         # evaluate actions
-        action_log_probs, dist_entropy = evaluate_actions_mj(mu, sigma, actions)
+        # import ipdb; ipdb.set_trace()
+        action_log_probs = evaluate_actions_mj(mu, sigma, actions)
         # calculate advantages...
         advantages = returns - values
         # get the value loss
@@ -175,19 +176,19 @@ class a2c_agent:
         # get the action loss. We detach advantages to reduce to standard PG form upon diff
         action_loss = -(advantages.detach() * action_log_probs).mean()
         # total loss
-        total_loss = action_loss + self.args.value_loss_coef * value_loss - self.args.entropy_coef * dist_entropy
+        total_loss = action_loss + self.args.value_loss_coef * value_loss
         # start to update
         self.optimizer.zero_grad()
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.max_grad_norm)
         self.optimizer.step()
-        return value_loss.item(), action_loss.item(), dist_entropy.item()
+        return value_loss.item(), action_loss.item(), action_log_probs.mean()
 
     def _get_tensors(self, obs):
         """
         Get the input tensors...
         """
-        input_tensor = torch.from_numpy(obs, dtype=torch.float32)
+        input_tensor = torch.tensor(obs, dtype=torch.float32)
         if self.args.cuda:
             input_tensor = input_tensor.cuda()
         return input_tensor

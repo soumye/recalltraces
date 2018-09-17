@@ -28,7 +28,6 @@ def select_state(mu, deterministic=False):
 def evaluate_actions(pi, actions):
     """
     Get the action log prob and entropy... Will be used for entropy regularization
-
     """
     cate_dist = Categorical(pi)
     return cate_dist.log_prob(actions.squeeze(-1)).unsqueeze(-1), cate_dist.entropy().mean()
@@ -50,7 +49,7 @@ def discount_with_dones(rewards, dones, gamma):
 
 def select_mj(mu, sigma, deterministic=False):
     """
-    Select Δs_t from Multivariate normal with mean mu and cov_matrix
+    Select Δs_t or action from Multivariate normal with mean mu and cov_matrix
     """
     if deterministic:
         return mu
@@ -62,9 +61,10 @@ def select_mj(mu, sigma, deterministic=False):
         return gauss.sample().view(shape)
 
 def evaluate_actions_mj(mu, sigma, actions):
-    shape = mu.shape
-    mu = mu.view(-1)
-    sigma = sigma.view(-1)
-    actions = actions.view(-1)
-    gauss = MultivariateNormal(mu, torch.diag(sigma))
+    """
+    Evaluate continuous actions batchwise.
+    """
+    cov = torch.zeros(mu.shape[0],mu.shape[1],mu.shape[1])
+    cov.as_strided(sigma.size(), [cov.stride(0), cov.size(2) + 1]).copy_(sigma)
+    gauss = MultivariateNormal(mu, cov)
     return gauss.log_prob(actions)

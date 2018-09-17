@@ -7,7 +7,7 @@ from baselines import logger
 if __name__ == '__main__':
     args = achieve_arguments()
     #Logger helps to set correct logs for using tensorboard later
-    logger.configure(dir=args.log_dir)
+    # logger.configure(dir=args.log_dir)
     # create environments
     env_args = {'episode_life': False, 'clip_rewards': False}
     #VecFrameStacks is Frame-Stacking with 4 frames for atari environments
