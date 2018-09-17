@@ -47,3 +47,28 @@ def discount_with_dones(rewards, dones, gamma):
         r = reward + gamma * r * (1.-done)
         discounted.append(r)
     return discounted[::-1]
+
+def select_action_mj(mu, deterministic=False):
+    """
+    Select a_t from Multivariate normal with mean mu anc cov
+    """
+    if deterministic:
+        return mu
+    else:
+        shape = mu.shape
+        mu = mu.view(-1)
+        gauss = MultivariateNormal(mu.view(-1), torch.eye(mu.shape[0]))
+        return gauss.sample().view(shape)
+
+def select_state_mj(mu, sigma, deterministic=False):
+    """
+    Select Δs_t from Multivariate normal with mean mu and cov_matrix
+    """
+    if deterministic:
+        return mu
+    else:
+        shape = mu.shape
+        mu = mu.view(-1)
+        sigma = sigma.view(-1)
+        gauss = MultivariateNormal(mu, torch.diag(sigma))
+        return gauss.sample().view(shape)
