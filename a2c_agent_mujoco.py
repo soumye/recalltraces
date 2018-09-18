@@ -121,7 +121,7 @@ class a2c_agent:
             mb_rewards = mb_rewards.flatten()
             mb_actions = mb_actions.reshape(self.args.num_processes * self.args.nsteps,-1)
             # start to update network. Doing A2C Update
-            vl, al, adv = self._update_network(mb_obs, mb_rewards, mb_actions)
+            vl, al, adv = self._update_network(mb_obs, mb_rewards, mb_actions, update)
 
             # start to update the sil_module or backtracking model
             if self.args.model_type == 'sil':
@@ -134,25 +134,25 @@ class a2c_agent:
 
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
-                    print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
-                            'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, VS:{}, S:{}'.format(\
+                    print('[{}] Update: {} of {} Frames: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
+                            'Ent: {:.2f} Min: {} Max:{} BR:{} E:{} VS:{} S:{}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
                 elif (self.args.model_type == 'bw') and (l_actgen and  l_stategen and l_imi) is not None :
-                    print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.4f}, PL: {:.4f},' \
-                            'Ent: {:.2f}, Min: {}, Max:{}, BR:{}, E:{}, S:{}, AG:{:.4f} , SG:{:.4f}, IMI:{:.4f}'.format(\
+                    print('[{}] Update: {} of {} Frames: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
+                            'Ent: {:.2f} Min: {} Max:{} BR:{} E:{} S:{} AG:{:.4f} SG:{:.4f} IMI:{:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
                             bw_model.num_episodes(), bw_model.num_steps(), l_actgen, l_stategen, l_imi))
                 else:
-                    print('[{}] Update: {}/{}, Frames: {}, Rewards: {:.2f}, VL: {:.3f}, PL: {:.3f},' \
-                            'Adv:{:.3f}, Min: {}, Max:{}'.format(\
+                    print('[{}] Update: {} of {} Frames: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
+                            'Adv:{:.3f} Min: {} Max:{}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al,adv, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
 
-    def _update_network(self, obs, returns, actions):
+    def _update_network(self, obs, returns, actions, update):
         """
         Learning the Policy Network using A2C.
         """
@@ -167,7 +167,6 @@ class a2c_agent:
             returns = returns.cuda()
             actions = actions.cuda()
         # evaluate actions
-        # import ipdb; ipdb.set_trace()
         action_log_probs = evaluate_actions_mj(mu, sigma, actions)
         # calculate advantages...
         advantages = returns - values
@@ -182,7 +181,7 @@ class a2c_agent:
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.max_grad_norm)
         self.optimizer.step()
-        return value_loss.item(), action_loss.item(), action_log_probs.mean()
+        return value_loss.item(), action_loss.item(), advantages.mean()
 
     def _get_tensors(self, obs):
         """

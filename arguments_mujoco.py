@@ -15,7 +15,7 @@ def achieve_arguments():
     parse.add_argument('--nsteps', type=int, default=5, help='the steps to update the network')
     parse.add_argument('--num-processes', type=int, default=16, help='the number of cpu you use')
     parse.add_argument('--entropy-coef', type=float, default=0.01, help='entropy-reg')
-    parse.add_argument('--log-interval', type=int, default=100, help='the log interval')
+    parse.add_argument('--log-interval', type=int, default=1000, help='the log interval')
     parse.add_argument('--alpha', type=float, default=0.99, help='the alpha coe of RMSprop')
     parse.add_argument('--max-grad-norm', type=float, default=0.5, help='the grad clip')
     parse.add_argument('--use-gae', action='store_true', help='use-gae')
