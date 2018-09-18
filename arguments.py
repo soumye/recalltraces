@@ -9,7 +9,7 @@ def achieve_arguments():
     parse.add_argument('--value-loss-coef', type=float, default=0.5, help='the coefficient of value loss')
     parse.add_argument('--tau', type=float, default=0.95, help='gae coefficient')
     parse.add_argument('--cuda', action='store_true', help='use cuda do the training')
-    parse.add_argument('--total-frames', type=int, default=80000000, help='the total frames for training')
+    parse.add_argument('--total-frames', type=int, default=20000000, help='the total frames for training')
     parse.add_argument('--eps', type=float, default=1e-5, help='param for adam optimizer')
     parse.add_argument('--save-dir', type=str, default='saved_models/', help='the folder to save models')
     parse.add_argument('--nsteps', type=int, default=5, help='the steps to update the network')

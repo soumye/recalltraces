@@ -121,5 +121,5 @@ core
 scripts/*
 oldlogs/*
 slurm*
-a.gnu
 *.out
+*.png
