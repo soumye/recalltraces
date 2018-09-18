@@ -3,7 +3,7 @@ import ipdb
 import torch
 from models_mujoco import Net
 from datetime import datetime
-from utils import select_mj, evaluate_actions_mj, discount_with_dones
+from utils import select_mj, evaluate_mj, discount_with_dones
 import os
 from sil_module import sil_module
 from bw_module import bw_module
@@ -26,9 +26,7 @@ class a2c_agent:
         if not os.path.exists(self.model_path):
             os.mkdir(self.model_path)
         # get the obs..
-        # the shape of the observation batch : 80x84x84x4. But we feed into the NNS as 4x84x84
-        # self.batch_ob_shape = (self.args.num_processes * self.args.nsteps,) + self.envs.observation_space.shape
-        # Initialize observation seen by the environment. Dim : # of processes(16) X observation_space.shape(84x84x4)
+        # Initialize observation seen by the environment. Dim : # of processes(16) X observation_space.shape
         self.obs = np.zeros((self.args.num_processes, self.envs.observation_space.shape[0]), dtype=self.envs.observation_space.dtype.name)
         # env already encapsulated the multiple processes
         self.obs[:] = self.envs.reset()
@@ -42,14 +40,13 @@ class a2c_agent:
         if self.args.model_type == 'sil':
             sil_model = sil_module(self.net, self.args, self.optimizer)
         elif self.args.model_type == 'bw':
-            bw_model = bw_module(self.net, self.args, self.optimizer, self.envs.action_space.n, self.envs.observation_space.shape)
+            bw_model = bw_module(self.net, self.args, self.optimizer, self.envs.action_space, self.envs.observation_space)
         num_updates = self.args.total_frames // (self.args.num_processes * self.args.nsteps)
         # get the reward to calculate other information
         episode_rewards = torch.zeros([self.args.num_processes, 1])
         final_rewards = torch.zeros([self.args.num_processes, 1])
         # start to update
         for update in range(num_updates):
-            # mb_obs, mb_rewards, mb_actions, mb_dones, mb_obs_next = [], [], [], [], []
             mb_obs, mb_rewards, mb_actions, mb_dones = [], [], [], []
             for step in range(self.args.nsteps):
                 # Executing the action after seeing the observation
@@ -80,8 +77,9 @@ class a2c_agent:
                     # Update the Buffers after doing the step
                     sil_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones)
                 elif self.args.model_type == 'bw':
-                    obs_next = self._get_tensors(self.obs).detach().cpu().numpy()
-                    bw_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones, obs_next)
+                    # obs_next = self._get_tensors(self.obs).detach().cpu().numpy()
+                    # We pass in only numpy objects
+                    bw_model.step(input_tensor.detach().cpu().numpy(), cpu_actions, raw_rewards, dones, self.obs)
 
                 raw_rewards = torch.from_numpy(np.expand_dims(np.stack(raw_rewards), 1)).float()
                 episode_rewards += raw_rewards
@@ -92,10 +90,7 @@ class a2c_agent:
                 episode_rewards *= masks
                 # update the obs
             mb_dones.append(self.dones)
-            # process the rollouts
-            # 5x16xobs_shape to 80 x obs_shape
-            # mb_obs = np.asarray(mb_obs, dtype=np.uint8).swapaxes(1, 0).reshape(self.batch_ob_shape)
-            # mb_obs_next = np.asarray(mb_obs_next, dtype=np.uint8).swapaxes(1, 0).reshape(self.batch_ob_shape)
+            # process the rollouts. List to np array
             # 5x16 To 16x5
             mb_obs = np.asarray(mb_obs, dtype=np.float32).swapaxes(1,0)
             mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
@@ -167,7 +162,7 @@ class a2c_agent:
             returns = returns.cuda()
             actions = actions.cuda()
         # evaluate actions
-        action_log_probs = evaluate_actions_mj(mu, sigma, actions)
+        action_log_probs = evaluate_mj(mu, sigma, actions)
         # calculate advantages...
         advantages = returns - values
         # get the value loss
