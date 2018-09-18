@@ -5,8 +5,8 @@ from models_mujoco import Net
 from datetime import datetime
 from utils import select_mj, evaluate_mj, discount_with_dones
 import os
-from sil_module import sil_module
-from bw_module import bw_module
+from sil_module_mujoco import sil_module
+from bw_module_mujoco import bw_module
 import copy
 
 class a2c_agent:
@@ -122,29 +122,35 @@ class a2c_agent:
             if self.args.model_type == 'sil':
                 mean_adv, num_samples = sil_model.train_sil_model()
             elif self.args.model_type == 'bw':
-                # print("train bw model")
-                l_actgen, l_stategen = bw_model.train_bw_model(update)
-                # print("train imitation")
+                l_bw = bw_model.train_bw_model(update)
                 l_imi = bw_model.train_imitation(update)
-
+                if self.args.consistency:
+                    l_bw, l_fw = bw_model.train_bw_model(update)
+                    l_imi, l_cons = bw_model.train_imitation(update)
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
                     print('[{}] Update: {} of {} Frames: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
-                            'Ent: {:.2f} Min: {} Max:{} BR:{} E:{} VS:{} S:{}'.format(\
+                            'Adv: {:.2f} Min: {} Max:{} BR:{} E:{} VS:{} S:{}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
-                            final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
+                            final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
-                elif (self.args.model_type == 'bw') and (l_actgen and  l_stategen and l_imi) is not None :
+                elif (self.args.model_type == 'bw') and (l_bw and l_imi and l_cons) is not None :
                     print('[{}] Update: {} of {} Frames: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
-                            'Ent: {:.2f} Min: {} Max:{} BR:{} E:{} S:{} AG:{:.4f} SG:{:.4f} IMI:{:.4f}'.format(\
+                            'Adv: {:.2f} Min: {} Max:{} BR:{} E:{} S:{} BW:{:.4f} IMI:{:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
-                            final_rewards.mean(), vl, al, ent, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
-                            bw_model.num_episodes(), bw_model.num_steps(), l_actgen, l_stategen, l_imi))
+                            final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
+                            bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi))
+                elif (self.args.model_type == 'bw') and (self.args.consistency) and (l_bw and l_imi and l_cons and l_fw) is not None :
+                    print('[{}] Update: {} of {} Frames: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
+                            'Adv: {:.2f} Min: {} Max:{} BR:{} E:{} S:{} BW:{:.4f} IMI:{:.4f} FW:{:.4f} CONS:{:.4f}'.format(\
+                            datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
+                            final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
+                            bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi, l_fw, l_cons))
                 else:
                     print('[{}] Update: {} of {} Frames: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
                             'Adv:{:.3f} Min: {} Max:{}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
-                            final_rewards.mean(), vl, al,adv, final_rewards.min(), final_rewards.max()))
+                            final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
 
     def _update_network(self, obs, returns, actions, update):

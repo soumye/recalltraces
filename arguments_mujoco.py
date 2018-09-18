@@ -37,6 +37,7 @@ def achieve_arguments():
     parse.add_argument('--trace-size', type=int, default=5, help='Number of steps to backtrack on for a given high value state ie length of trajectory')
     parse.add_argument('--state-coef', type=float, default=1e-7, help='regularization for state generator coefficient')
     parse.add_argument('--per-weight', action='store_true', help='weigh the lossed based on PER weights')
+    parse.add_argument('--consistency', action='store_true', help='For consistency bw forward and backward model')
     args = parse.parse_args()
 
     return args

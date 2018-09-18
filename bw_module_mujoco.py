@@ -113,6 +113,10 @@ class bw_module:
             self.bw_stategen.cuda()
         self.bw_params = list(self.bw_actgen.parameters()) + list(self.bw_stategen.parameters())
         self.bw_optimizer = torch.optim.RMSprop(self.bw_params, lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+        #Create a forward model
+        if self.args.consistency:
+            self.fw_stategen = StateGen(self.obs_shape, self.action_shape)
+            self.fw_optimizer = torch.optim.RMSprop(self.fw_stategen.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
         #Create an episode buffer of size : # processes
         self.running_episodes = [[] for _ in range(self.args.num_processes)]
         self.buffer = PrioritizedReplayBuffer(self.args.capacity, self.args.sil_alpha)
@@ -131,7 +135,6 @@ class bw_module:
             # get basic information of network..
             obs = torch.tensor(obs, dtype=torch.float32)
             obs_next = torch.tensor(obs_next, dtype=torch.float32)
-            # TODO : See if unsqueeze is required. I think not
             # actions = torch.tensor(actions, dtype=torch.float32).unsqueeze(1)
             actions = torch.tensor(actions, dtype=torch.float32)
             if self.args.per_weight:
@@ -144,6 +147,7 @@ class bw_module:
                 if self.args.per_weight:
                     weights = weights.cuda()
                     # max_nlogp = max_nlogp.cuda()
+            # Train BW - Model
             a_mu = self.bw_actgen(obs_next)
             s_mu, s_sigma = self.bw_stategen(obs_next, actions)
             a_sigma = torch.ones_like(a_mu)
@@ -166,15 +170,33 @@ class bw_module:
                 value, _, _ = self.network(obs_next)
             value = torch.clamp(value, min=0)
             self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
-            return total_loss, total_loss
-        else:
-            return None, None
 
+            # Train FW - Model
+            if self.args.consistency
+                f_mu, f_sigma = self.fw_stategen(obs, actions)
+                log_probs = evaluate_mj(f_mu, f_sigma, obs_next)
+                if self.args.per_weight:
+                    fw_loss = -torch.mean(log_probs)
+                else:
+                    fw_loss = -torch.mean(log_probs*weights)
+                self.fw_optimizer.zero_grad()
+                fw_loss.backward()
+                torch.nn.under.clip_grad_norm_(self.fw_stategen.parameters(), self.args.max_grad_norm)
+                self.fw_optimizer.step()
+                return total_loss, fw_loss
+            else:
+                return total_loss
+
+        elif self.args.consistency:
+            return None, None
+        else:
+            return None
+    
     def train_imitation(self, update):
         """
         Do these steps
         1. Generate Recall traces from bw_model
-        2. Do imiation learning using those recall traces
+        2. Do imitation learning using those recall traces
         """
         # maintain list of sampled episodes(batchwise) and append to list. Then do Imitation learning simply
         _ , _ , _ , states, _ , _ = self.sample_batch(self.args.num_states*3)
@@ -305,13 +327,3 @@ class bw_module:
             r = reward + gamma * r * (1. - done)
             discounted.append(r)
         return discounted[::-1]
-
-    def indexes_to_one_hot(self, indexes):
-        """Converts a vector of indexes to a batch of one-hot vectors. """
-        indexes = indexes.type(torch.int64).view(-1, 1)
-        one_hots = torch.zeros(indexes.shape[0], self.num_actions)
-        # one_hots = one_hots.view(*indexes.shape, -1)
-        if self.args.cuda:
-            one_hots = one_hots.cuda()
-        one_hots = one_hots.scatter_(1, indexes, 1)
-        return one_hots
