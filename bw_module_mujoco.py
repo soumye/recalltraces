@@ -111,13 +111,13 @@ class bw_module:
             self.bw_stategen.cuda()
         self.bw_params = list(self.bw_actgen.parameters()) + list(self.bw_stategen.parameters())
         # self.bw_optimizer = torch.optim.RMSprop(self.bw_params, lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
-        self.bw_optimizer = torch.optim.Adam(self.bw_params, lr=self.args.lr, eps=self.args.eps)
+        self.bw_optimizer = torch.optim.Adam(self.bw_params, lr=self.args.lr)
         
         #Create a forward model
         if self.args.consistency:
             self.fw_stategen = StateGen(self.obs_shape, self.action_shape)
-            if self.args.cuda"
-            self.fw_stategen.cuda()
+            if self.args.cuda:
+                self.fw_stategen.cuda()
             # self.fw_optimizer = torch.optim.RMSprop(self.fw_stategen.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
             self.fw_optimizer = torch.optim.Adam(self.fw_stategen.parameters(), lr=self.args.lr)
         #Create an episode buffer of size : # processes
@@ -138,18 +138,15 @@ class bw_module:
             # get basic information of network..
             obs = torch.tensor(obs, dtype=torch.float32)
             obs_next = torch.tensor(obs_next, dtype=torch.float32)
-            # actions = torch.tensor(actions, dtype=torch.float32).unsqueeze(1)
             actions = torch.tensor(actions, dtype=torch.float32)
             if self.args.per_weight:
                 weights = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
-                # max_nlogp = torch.tensor(np.ones((len(idxes), 1)) * self.args.max_nlogp, dtype=torch.float32)
             if self.args.cuda:
                 obs = obs.cuda()
                 obs_next = obs_next.cuda()
                 actions = actions.cuda()
                 if self.args.per_weight:
                     weights = weights.cuda()
-                    # max_nlogp = max_nlogp.cuda()
             # Train BW - Model
             a_mu = self.bw_actgen(obs_next)
             s_mu, s_sigma = self.bw_stategen(obs_next, actions)
@@ -157,8 +154,8 @@ class bw_module:
             if self.args.cuda:
                 a_sigma = a_sigma.cuda()
             # Calculate Losses
-            action_log_probs = evaluate_mj(a_mu, a_sigma, actions)
-            state_log_probs = evaluate_mj(s_mu, s_sigma, obs - obs_next)
+            action_log_probs = evaluate_mj(self.args, a_mu, a_sigma, actions)
+            state_log_probs = evaluate_mj(self.args, s_mu, s_sigma, obs - obs_next)
             if self.args.per_weight:
                 total_loss = -torch.mean(action_log_probs*weights) - torch.mean(state_log_probs*weights)
             else:
@@ -177,7 +174,7 @@ class bw_module:
             # Train FW - Model
             if self.args.consistency:
                 f_mu, f_sigma = self.fw_stategen(obs, actions)
-                log_probs = evaluate_mj(f_mu, f_sigma, obs_next)
+                log_probs = evaluate_mj(self.args, f_mu, f_sigma, obs_next)
                 if self.args.per_weight:
                     fw_loss = -torch.mean(log_probs)
                 else:
@@ -191,9 +188,9 @@ class bw_module:
                 return total_loss
 
         elif self.args.consistency:
-            return None, None
+            return 0.0, 0.0
         else:
-            return None
+            return 0.0
 
     def train_imitation(self, update):
         """
@@ -202,7 +199,7 @@ class bw_module:
         2. Do imitation learning using those recall traces
         """
         # maintain list of sampled episodes(batchwise) and append to list. Then do Imitation learning simply
-        _ , _ , _ , states, _ , _ = self.sample_batch(self.args.num_states*3)
+        _ , _ , _ , states, _ , _ = self.sample_batch(self.args.num_states*5)
         if states is not None:
             with torch.no_grad():
                 states = torch.tensor(states, dtype=torch.float32)
@@ -237,7 +234,7 @@ class bw_module:
                 mb_states_prev = mb_states_prev.cuda()
             _, mu, sigma = self.network(mb_states_prev)
             try:
-                action_log_probs = evaluate_mj(mu, sigma, mb_actions)
+                action_log_probs = evaluate_mj(self.args, mu, sigma, mb_actions)
             except:
                 print(mu, sigma)
                 import ipdb;ipdb.set_trace()
@@ -253,9 +250,9 @@ class bw_module:
             else:
                 return total_loss
         elif self.args.consistency:
-            return None, None
+            return 0.0, 0.0
         else:
-            return None
+            return 0.0
 
     def step(self, obs, actions, rewards, dones, obs_next):
         """

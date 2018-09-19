@@ -5,7 +5,7 @@ from models_mujoco import Net
 from datetime import datetime
 from utils import select_mj, evaluate_mj, discount_with_dones
 import os
-from sil_module_mujoco import sil_module
+from sil_module import sil_module
 from bw_module_mujoco import bw_module
 import copy
 
@@ -122,12 +122,31 @@ class a2c_agent:
             # start to update the sil_module or backtracking model
             if self.args.model_type == 'sil':
                 mean_adv, num_samples = sil_model.train_sil_model()
-            elif self.args.model_type == 'bw':
-                l_bw = bw_model.train_bw_model(update)
-                l_imi = bw_model.train_imitation(update)
-                if self.args.consistency:
-                    l_bw, l_fw = bw_model.train_bw_model(update)
-                    l_imi, l_cons = bw_model.train_imitation(update)
+            elif (self.args.model_type == 'bw') and (update % self.args.n_a2c == 0):
+                if not self.args.consistency:
+                    l_bw, l_imi = 0.0, 0.0
+                    for _ in range(self.args.n_bw):
+                        l_bw += bw_model.train_bw_model(update)
+                    l_bw /= self.args.n_bw
+                    for _ in range(self.args.n_imi):
+                        l_imi += bw_model.train_imitation(update)
+                    l_imi /= self.args.n_imi
+                else:
+                    l_bw, l_fw = 0.0, 0.0
+                    for _ in range(self.args.n_bw):
+                        l_bw_, l_fw_ = bw_model.train_bw_model(update)
+                        l_bw += l_bw_
+                        l_fw += l_fw_
+                    l_bw /= self.args.n_bw
+                    l_fw /= self.args.n_bw
+                    l_imi, l_cons = 0.0, 0.0
+                    for _ in range(self.args.n_imi):
+                        l_imi_, l_cons_ = bw_model.train_imitation(update)
+                        l_imi += l_imi_
+                        l_cons_ += l_cons_
+                    l_imi /= self.args.n_imi
+                    l_cons /= self.args.n_imi
+            
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
@@ -135,18 +154,18 @@ class a2c_agent:
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
-                elif (self.args.model_type == 'bw') and (l_bw and l_imi) is not None :
-                    print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
-                            'Adv: {:.2f} Min: {} Max: {} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f}'.format(\
-                            datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
-                            final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
-                            bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi))
-                elif (self.args.model_type == 'bw') and (self.args.consistency) and (l_bw and l_imi and l_cons and l_fw) is not None :
+                elif (self.args.model_type == 'bw') and (self.args.consistency) :
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
                             'Adv: {:.2f} Min: {} Max: {} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f} FW: {:.4f} CONS: {:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
                             bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi, l_fw, l_cons))
+                elif self.args.model_type == 'bw':
+                    print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
+                            'Adv: {:.2f} Min: {} Max: {} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f}'.format(\
+                            datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
+                            final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
+                            bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi))
                 else:
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
                             'Adv:{:.3f} Min: {} Max: {}'.format(\
@@ -162,14 +181,14 @@ class a2c_agent:
         input_tensor = self._get_tensors(obs)
         values, mu, sigma = self.net(input_tensor)
         # define the tensor of actions, returns
-        # convert to 2D tensor of (16*5=80)x1
+        # convert to 2D tensor of (#processesxn_steps)x1
         returns = torch.tensor(returns, dtype=torch.float32)
         actions = torch.tensor(actions, dtype=torch.float32)
         if self.args.cuda:
             returns = returns.cuda()
             actions = actions.cuda()
         # evaluate actions
-        action_log_probs = evaluate_mj(mu, sigma, actions)
+        action_log_probs = evaluate_mj(self.args, mu, sigma, actions)
         # calculate advantages...
         advantages = returns - values
         # get the value loss

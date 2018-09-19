@@ -60,11 +60,12 @@ def select_mj(mu, sigma, deterministic=False):
         gauss = MultivariateNormal(mu, torch.diag(sigma))
         return gauss.sample().view(shape)
 
-def evaluate_mj(mu, sigma, actions):
+def evaluate_mj(args, mu, sigma, actions):
     """
     Evaluate continuous actions/state batchwise.
     """
     cov = torch.zeros(mu.shape[0],mu.shape[1],mu.shape[1])
     cov.as_strided(sigma.size(), [cov.stride(0), cov.size(2) + 1]).copy_(sigma)
     gauss = MultivariateNormal(mu, cov)
-    return gauss.log_prob(actions)
+    log_probs = gauss.log_prob(actions)
+    return torch.clamp(log_probs, min=-args.logclip, max=args.logclip)
