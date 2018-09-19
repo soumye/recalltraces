@@ -2,14 +2,15 @@ import argparse
 
 def achieve_arguments():
     parse = argparse.ArgumentParser()
+    # Standard Arguments
     parse.add_argument('--gamma', type=float, default=0.99, help='the discount factor of RL')
-    parse.add_argument('--seed', type=int, default=123, help='the random seeds')
+    parse.add_argument('--seed', type=int, default=43, help='the random seeds')
     parse.add_argument('--env-name', type=str, default='HalfCheetah-v2', help='the environment name')
     parse.add_argument('--lr', type=float, default=3e-4, help='learning rate of the algorithm')
     parse.add_argument('--value-loss-coef', type=float, default=0.5, help='the coefficient of value loss')
     parse.add_argument('--tau', type=float, default=0.95, help='gae coefficient')
     parse.add_argument('--cuda', action='store_true', help='use cuda do the training')
-    parse.add_argument('--total-frames', type=int, default=20000000, help='the total frames for training')
+    parse.add_argument('--total-frames', type=int, default=60000000, help='the total frames(timesteps) for training')
     parse.add_argument('--eps', type=float, default=1e-5, help='param for adam optimizer')
     parse.add_argument('--save-dir', type=str, default='saved_models/', help='the folder to save models')
     parse.add_argument('--nsteps', type=int, default=5, help='the steps to update the network')
@@ -33,8 +34,8 @@ def achieve_arguments():
     parse.add_argument('--k-states', type=int, default=64, help='Number of top value states to train Backtracking Model on')
     parse.add_argument('--model-type', type=str, default='bw', help='Which model to use: "vanilla", "sil", "bw"' )
     parse.add_argument('--num-states', type=int, default=5, help='Number of high value state to actually backtrack on')
-    parse.add_argument('--num-traces', type=int, default=1, help='Number of traces for each high value state ')
-    parse.add_argument('--trace-size', type=int, default=5, help='Number of steps to backtrack on for a given high value state ie length of trajectory')
+    # parse.add_argument('--num-traces', type=int, default=1, help='Number of traces for each high value state ')
+    parse.add_argument('--trace-size', type=int, default=20, help='Number of steps to backtrack on for a given high value state ie length of trajectory')
     parse.add_argument('--state-coef', type=float, default=1e-7, help='regularization for state generator coefficient')
     parse.add_argument('--per-weight', action='store_true', help='weigh the lossed based on PER weights')
     parse.add_argument('--consistency', action='store_true', help='For consistency bw forward and backward model')

@@ -172,7 +172,7 @@ class bw_module:
             self.buffer.update_priorities(idxes, value.squeeze(1).cpu().numpy())
 
             # Train FW - Model
-            if self.args.consistency
+            if self.args.consistency:
                 f_mu, f_sigma = self.fw_stategen(obs, actions)
                 log_probs = evaluate_mj(f_mu, f_sigma, obs_next)
                 if self.args.per_weight:
@@ -191,7 +191,7 @@ class bw_module:
             return None, None
         else:
             return None
-    
+
     def train_imitation(self, update):
         """
         Do these steps
@@ -207,42 +207,52 @@ class bw_module:
                     states = states.cuda()
                 value, _, _ = self.network(states)
                 sorted_indices = value.cpu().numpy().reshape(-1).argsort()[-self.args.num_states:][::-1]
-                # Select high value states under currect valuation
-                hv_states = states[sorted_indices.tolist()]
 
-            for n in range(self.args.num_traces):
-                # An iteration of sampling recall traces and doing imitation learning
-                mb_actions, mb_states_prev = [], []
-                states_next = hv_states
-                for step in range(self.args.trace_size):
-                    with torch.no_grad():
-                        a_mu = self.bw_actgen(states_next)
-                        a_sigma = torch.ones_like(a_mu)
-                        if self.args.cuda:
-                            a_sigma = a_sigma.cuda()
-                        actions = select_mj(a_mu, a_sigma)
-                        s_mu, s_sigma = self.bw_stategen(states_next, actions)
-                        # s_t = s_t+1 + Δs_t
-                        states_prev = states_next + select_mj(s_mu, s_sigma)
-                        states_next = states_prev
-                    # Add to list
-                    mb_actions.append(actions.cpu().numpy())
-                    mb_states_prev.append(states_prev.cpu().numpy())
-                # Begin to do Imitation Learning
-                # mb_actions = torch.tensor(mb_actions, dtype=torch.float32).unsqueeze(1).view(self.args.num_states*self.args.trace_size, -1)
-                mb_actions = torch.tensor(mb_actions, dtype=torch.float32).view(self.args.num_states*self.args.trace_size, -1)
-                mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32).view(self.args.num_states*self.args.trace_size, -1)
-                if self.args.cuda:
-                    mb_actions = mb_actions.cuda()
-                    mb_states_prev = mb_states_prev.cuda()
-                _, mu, sigma = self.network(mb_states_prev)
+            # Select high value states under currect valuation for target states_next
+            states_next = states[sorted_indices.tolist()]
+            mb_actions, mb_states_prev = [], []
+            for step in range(self.args.trace_size):
+                with torch.no_grad():
+                    a_mu = self.bw_actgen(states_next)
+                    a_sigma = torch.ones_like(a_mu)
+                    if self.args.cuda:
+                        a_sigma = a_sigma.cuda()
+                    actions = select_mj(a_mu, a_sigma)
+                    s_mu, s_sigma = self.bw_stategen(states_next, actions)
+                    # s_t = s_t+1 + Δs_t
+                    states_prev = states_next + select_mj(s_mu, s_sigma)
+                    states_next = states_prev
+                # Add to list
+                mb_actions.append(actions.cpu().numpy())
+                mb_states_prev.append(states_prev.cpu().numpy())
+            # Begin to do Imitation Learning
+            # mb_actions = torch.tensor(mb_actions, dtype=torch.float32).unsqueeze(1).view(self.args.num_states*self.args.trace_size, -1)
+            mb_actions = torch.tensor(mb_actions, dtype=torch.float32).view(self.args.num_states*self.args.trace_size, -1)
+            mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32).view(self.args.num_states*self.args.trace_size, -1)
+            if self.args.cuda:
+                mb_actions = mb_actions.cuda()
+                mb_states_prev = mb_states_prev.cuda()
+            _, mu, sigma = self.network(mb_states_prev)
+            try:
                 action_log_probs = evaluate_mj(mu, sigma, mb_actions)
-                total_loss = -torch.mean(action_log_probs)
-                self.optimizer.zero_grad()
-                total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.args.max_grad_norm)
-                self.optimizer.step()
+            except:
+                print(mu, sigma)
+                import ipdb;ipdb.set_trace()
+            total_loss = -torch.mean(action_log_probs)
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.args.max_grad_norm)
+            self.optimizer.step()
+
+            # Do the Consistency Bit
+            if self.args.consistency:
+                print('foo')
+            else:
                 return total_loss
+        elif self.args.consistency:
+            return None, None
+        else:
+            return None
 
     def step(self, obs, actions, rewards, dones, obs_next):
         """
@@ -301,7 +311,7 @@ class bw_module:
         returns = self.discount_with_dones(rewards, dones, self.args.gamma)
         for (ob, action, R, ob_next) in list(zip(obs, actions, returns, obs_next)):
             self.buffer.add(ob, action, R, ob_next)
-    
+
     def get_best_reward(self):
         if len(self.total_rewards) > 0:
             return np.max(self.total_rewards)
