@@ -103,8 +103,6 @@ class bw_module:
         self.optimizer = optimizer
         self.action_shape = action_shape
         self.obs_shape = obs_shape
-        # obs_state_shape is 84x84x84 but we need ...x4x84x84
-        # self.batch_obs_state_shape = (self.args.num_states*self.args.trace_size, self.obs_state_shape[-1] ) + self.obs_state_shape[:-1]
         #Create Backward models
         self.bw_actgen = ActGen(self.obs_shape, self.action_shape)
         self.bw_stategen = StateGen(self.obs_shape, self.action_shape)
@@ -112,11 +110,16 @@ class bw_module:
             self.bw_actgen.cuda()
             self.bw_stategen.cuda()
         self.bw_params = list(self.bw_actgen.parameters()) + list(self.bw_stategen.parameters())
-        self.bw_optimizer = torch.optim.RMSprop(self.bw_params, lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+        # self.bw_optimizer = torch.optim.RMSprop(self.bw_params, lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+        self.bw_optimizer = torch.optim.Adam(self.bw_params, lr=self.args.lr, eps=self.args.eps)
+        
         #Create a forward model
         if self.args.consistency:
             self.fw_stategen = StateGen(self.obs_shape, self.action_shape)
-            self.fw_optimizer = torch.optim.RMSprop(self.fw_stategen.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+            if self.args.cuda"
+            self.fw_stategen.cuda()
+            # self.fw_optimizer = torch.optim.RMSprop(self.fw_stategen.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+            self.fw_optimizer = torch.optim.Adam(self.fw_stategen.parameters(), lr=self.args.lr)
         #Create an episode buffer of size : # processes
         self.running_episodes = [[] for _ in range(self.args.num_processes)]
         self.buffer = PrioritizedReplayBuffer(self.args.capacity, self.args.sil_alpha)

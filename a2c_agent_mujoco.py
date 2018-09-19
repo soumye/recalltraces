@@ -18,7 +18,8 @@ class a2c_agent:
         if self.args.cuda:
             self.net.cuda()
         # define the optimizer
-        self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+        # self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+        self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.args.lr)
         if not os.path.exists(self.args.save_dir):
             os.mkdir(self.args.save_dir)
         # check the saved path for envs..
