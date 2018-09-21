@@ -10,9 +10,10 @@ from bw_module_mujoco import bw_module
 import copy
 
 class a2c_agent:
-    def __init__(self, envs, args):
+    def __init__(self, envs, args, vis=None):
         self.envs = envs
         self.args = args
+        self.vis = vis
         # define the network. Gives V(s) and π(a|S)
         self.net = Net(self.envs.observation_space,self.envs.action_space)
         if self.args.cuda:
@@ -46,6 +47,11 @@ class a2c_agent:
         # get the reward to calculate other information
         episode_rewards = torch.zeros([self.args.num_processes, 1])
         final_rewards = torch.zeros([self.args.num_processes, 1])
+        vis_loss = []
+        vis_timesteps = []
+        vis_rewards = []
+        win = None
+        win2 = None
         # start to update
         for update in range(num_updates):
             mb_obs, mb_rewards, mb_actions, mb_dones = [], [], [], []
@@ -150,29 +156,49 @@ class a2c_agent:
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
-                            'Adv: {:.2f} Min: {} Max: {} BR: {} E: {} VS: {} S: {}'.format(\
+                            'Adv: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} VS: {} S: {}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
                 elif (self.args.model_type == 'bw') and (self.args.consistency) :
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
-                            'Adv: {:.2f} Min: {} Max: {} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f} FW: {:.4f} CONS: {:.4f}'.format(\
+                            'Adv: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f} FW: {:.4f} CONS: {:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
                             bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi, l_fw, l_cons))
                 elif self.args.model_type == 'bw':
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
-                            'Adv: {:.2f} Min: {} Max: {} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f}'.format(\
+                            'Adv: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
                             bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi))
                 else:
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
-                            'Adv:{:.3f} Min: {} Max: {}'.format(\
+                            'Adv:{:.3f} Min: {:.4f} Max: {:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
-
+            if self.args.vis and (update % self.args.vis_interval == 0):
+                if self.args.model_type == 'bw':
+                    vis_loss.append([vl, al, l_bw, l_imi])
+                    legend=['Value loss','policy loss', 'BW Loss','IMI loss']
+                else:
+                    vis_loss.append([vl, al])
+                    legend=['Value loss','policy loss']
+                vis_timesteps.append((update+1)*(self.args.num_processes * self.args.nsteps))
+                vis_rewards.append(final_rewards.mean())
+                title = self.args.env_name
+                if win is None:
+                    win = self.vis.line(Y=np.array(vis_rewards), X=np.array(vis_timesteps), opts=dict(title=title, xlabel='Timesteps',
+                                ylabel='Avg Rewards'))
+                self.vis.line(Y=np.array(vis_rewards), X=np.array(vis_timesteps), win=win, update='replace', opts=dict(title=title, xlabel='Timesteps',
+                                ylabel='Avg Rewards'))
+                if win2 is None:
+                    win2 = self.vis.line(Y=np.array(vis_loss), X=np.array(vis_timesteps), opts=dict(title=title, xlabel='Timesteps',
+                                ylabel='Losses', legend=legend))
+                self.vis.line(Y=np.array(vis_loss), X=np.array(vis_timesteps), win=win2, update='replace', opts=dict(title=title, xlabel='Timesteps',
+                                ylabel='Losses', legend=legend))
+                
     def _update_network(self, obs, returns, actions, update):
         """
         Learning the Policy Network using A2C.

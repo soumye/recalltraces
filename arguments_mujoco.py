@@ -18,6 +18,9 @@ def achieve_arguments():
     parse.add_argument('--log-interval', type=int, default=1000, help='the log interval')
     parse.add_argument('--max-grad-norm', type=float, default=0.5, help='the grad clip')
     parse.add_argument('--log-dir', type=str, default='logs/', help='the log dir')
+    parse.add_argument('--vis', action= 'store_true', help='Plot on Visdom Server')
+    parse.add_argument('--vis-interval', type=int, default=10, help='the log interval')
+    
     # parse.add_argument('--eps', type=float, default=1e-5, help='param for Adam/RMS optimizer')
     # parse.add_argument('--alpha', type=float, default=0.99, help='the alpha coe of RMSprop')
     # Buffer Params for SIL and BW

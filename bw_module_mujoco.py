@@ -6,7 +6,7 @@ import numpy as np
 import random
 from models_mujoco import ActGen, StateGen
 from baselines.common.segment_tree import SumSegmentTree, MinSegmentTree
-from utils import evaluate_actions_sil, select_mj, evaluate_mj
+from utils import evaluate_actions_sil, select_mj, evaluate_mj, zero_mean_unit_std
 
 class ReplayBuffer:
     """
@@ -134,17 +134,32 @@ class bw_module:
         obs, actions, _, obs_next, weights, idxes = self.sample_batch(self.args.k_states)
         batch_size = min(self.args.k_states, len(self.buffer))
         if obs is not None and obs_next is not None:
+            # obs, obs_mean, obs_std = zero_mean_unit_std(obs)
+            # actions, actions_mean, actions_std = zero_mean_unit_std(actions)
+            # obs_next, obs_next_mean, obs_next_std = zero_mean_unit_std(obs_next)
             # need to get the masks
             # get basic information of network..
             obs = torch.tensor(obs, dtype=torch.float32)
             obs_next = torch.tensor(obs_next, dtype=torch.float32)
             actions = torch.tensor(actions, dtype=torch.float32)
+            # obs_mean = torch.tensor(obs_mean, dtype=torch.float32)
+            # obs_std = torch.tensor(obs_std, dtype=torch.float32)
+            # obs_next_mean = torch.tensor(obs_next_mean, dtype=torch.float32)
+            # obs_next_std = torch.tensor(obs_next_std, dtype=torch.float32)
+            # actions_mean = torch.tensor(actions_mean, dtype=torch.float32)
+            # actions_std = torch.tensor(actions_std, dtype=torch.float32)
             if self.args.per_weight:
                 weights = torch.tensor(weights, dtype=torch.float32).unsqueeze(1)
             if self.args.cuda:
                 obs = obs.cuda()
                 obs_next = obs_next.cuda()
                 actions = actions.cuda()
+                # obs_mean = obs_mean.cuda()
+                # obs_std = obs_std.cuda()
+                # obs_next_mean = obs_next_mean.cuda()
+                # obs_next_std = obs_next_std.cuda()
+                # actions_mean = actions_mean.cuda()
+                # actions_std = actions_std.cuda()
                 if self.args.per_weight:
                     weights = weights.cuda()
             # Train BW - Model
@@ -183,9 +198,9 @@ class bw_module:
                 fw_loss.backward()
                 torch.nn.under.clip_grad_norm_(self.fw_stategen.parameters(), self.args.max_grad_norm)
                 self.fw_optimizer.step()
-                return total_loss, fw_loss
+                return total_loss.item(), fw_loss.item()
             else:
-                return total_loss
+                return total_loss.item()
 
         elif self.args.consistency:
             return 0.0, 0.0
@@ -248,7 +263,7 @@ class bw_module:
             if self.args.consistency:
                 print('foo')
             else:
-                return total_loss
+                return total_loss.item()
         elif self.args.consistency:
             return 0.0, 0.0
         else:
