@@ -155,12 +155,14 @@ class bw_module:
             if self.args.cuda:
                 obs_delta = obs_delta.cuda()
                 obs_next = obs_next.cuda()
+                obs_next_unnormalized = obs_next_unnormalized.cuda()
                 actions = actions.cuda()
                 if self.args.per_weight:
                     weights = weights.cuda()
             # Train BW - Model
             a_mu = self.bw_actgen(obs_next)
             s_mu, s_sigma = self.bw_stategen(obs_next, actions)
+            s_sigma = torch.ones_like(s_mu)
             a_sigma = torch.ones_like(a_mu)
             if self.args.cuda:
                 a_sigma = a_sigma.cuda()
@@ -235,11 +237,12 @@ class bw_module:
                     if self.args.cuda:
                         a_sigma = a_sigma.cuda()
                     actions = select_mj(a_mu, a_sigma)
-                    if self.args.cuda:
-                        actions = actions*torch.tensor(self.actions_std, dtype=torch.float32).cuda() + torch.tensor(self.actions_mean, dtype=torch.float32).cuda()
-                    else:
-                        actions = actions*torch.tensor(self.actions_std, dtype=torch.float32) + torch.tensor(self.actions_mean, dtype=torch.float32)
+                    # if self.args.cuda:
+                    #     actions = actions*torch.tensor(self.actions_std, dtype=torch.float32).cuda() + torch.tensor(self.actions_mean, dtype=torch.float32).cuda()
+                    # else:
+                    #     actions = actions*torch.tensor(self.actions_std, dtype=torch.float32) + torch.tensor(self.actions_mean, dtype=torch.float32)
                     s_mu, s_sigma = self.bw_stategen(states_next_preprocessed, actions)
+                    s_sigma = torch.ones_like(s_mu)
                     # s_t = s_t+1 + Δs_t
                     delta_state = select_mj(s_mu, s_sigma)
                     if self.args.cuda:
