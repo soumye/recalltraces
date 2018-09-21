@@ -119,7 +119,8 @@ core
 *.sh
 *debug.py
 scripts/*
-oldlogs/*
+outputs/*
 slurm*
 *.out
 *.png
+*.gnu

@@ -69,3 +69,10 @@ def evaluate_mj(args, mu, sigma, actions):
     gauss = MultivariateNormal(mu, cov)
     log_probs = gauss.log_prob(actions)
     return torch.clamp(log_probs, min=-args.logclip, max=args.logclip)
+
+def zero_mean_unit_std(dataX):
+    mean_x = np.mean(dataX, axis = 0)
+    dataX = dataX - mean_x
+    std_x = np.std(dataX, axis = 0)
+    dataX = np.nan_to_num(dataX/std_x)
+    return dataX, mean_x, std_x
