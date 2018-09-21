@@ -60,15 +60,19 @@ def select_mj(mu, sigma, deterministic=False):
         gauss = MultivariateNormal(mu, torch.diag(sigma))
         return gauss.sample().view(shape)
 
-def evaluate_mj(args, mu, sigma, actions):
+def evaluate_mj(args, mu, sigma, actions, clamp=True):
     """
     Evaluate continuous actions/state batchwise.
     """
     cov = torch.zeros(mu.shape[0],mu.shape[1],mu.shape[1])
+    # To diagonalize sigma batch wise. Converst batch_sizexD ---> batch_sizexDxD
     cov.as_strided(sigma.size(), [cov.stride(0), cov.size(2) + 1]).copy_(sigma)
     gauss = MultivariateNormal(mu, cov)
     log_probs = gauss.log_prob(actions)
-    return torch.clamp(log_probs, min=-args.logclip, max=args.logclip)
+    if clamp is True:
+        return torch.clamp(log_probs, min=-args.logclip, max=args.logclip), gauss.entropy()
+    else:
+        return log_probs, gauss.entropy()
 
 def zero_mean_unit_std(dataX):
     mean_x = np.mean(dataX, axis = 0)

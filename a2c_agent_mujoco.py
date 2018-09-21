@@ -19,8 +19,8 @@ class a2c_agent:
         if self.args.cuda:
             self.net.cuda()
         # define the optimizer
-        # self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
-        self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.args.lr)
+        self.optimizer = torch.optim.RMSprop(self.net.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+        # self.optimizer = torch.optim.Adam(self.net.parameters(), lr=self.args.lr)
         if not os.path.exists(self.args.save_dir):
             os.mkdir(self.args.save_dir)
         # check the saved path for envs..
@@ -47,6 +47,7 @@ class a2c_agent:
         # get the reward to calculate other information
         episode_rewards = torch.zeros([self.args.num_processes, 1])
         final_rewards = torch.zeros([self.args.num_processes, 1])
+        # Stuff for Visdom Plots
         vis_loss = []
         vis_timesteps = []
         vis_rewards = []
@@ -156,30 +157,34 @@ class a2c_agent:
             if update % self.args.log_interval == 0:
                 if self.args.model_type == 'sil':
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
-                            'Adv: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} VS: {} S: {}'.format(\
+                            'Ent: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} VS: {} S: {}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), sil_model.get_best_reward(), \
                             sil_model.num_episodes(), num_samples, sil_model.num_steps()))
                 elif (self.args.model_type == 'bw') and (self.args.consistency) :
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
-                            'Adv: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f} FW: {:.4f} CONS: {:.4f}'.format(\
+                            'Ent: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f} FW: {:.4f} CONS: {:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
                             bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi, l_fw, l_cons))
                 elif self.args.model_type == 'bw':
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.4f} PL: {:.4f} ' \
-                            'Adv: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f}'.format(\
+                            'Ent: {:.2f} Min: {:.4f} Max: {:.4f} BR: {} E: {} S: {} BW: {:.4f} IMI: {:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max(), bw_model.get_best_reward(), \
                             bw_model.num_episodes(), bw_model.num_steps(), l_bw, l_imi))
                 else:
                     print('[{}] Update: {} of {} Timesteps: {} Rewards: {:.2f} VL: {:.3f} PL: {:.3f} ' \
-                            'Adv:{:.3f} Min: {:.4f} Max: {:.4f}'.format(\
+                            'Ent:{:.3f} Min: {:.4f} Max: {:.4f}'.format(\
                             datetime.now(), update, num_updates, (update+1)*(self.args.num_processes * self.args.nsteps),\
                             final_rewards.mean(), vl, al, adv, final_rewards.min(), final_rewards.max()))
                 torch.save(self.net.state_dict(), self.model_path + 'model.pt')
+            # Save to Visdom Plots
             if self.args.vis and (update % self.args.vis_interval == 0):
-                if self.args.model_type == 'bw':
+                if (self.args.model_type == 'bw') and (self.args.consistency):
+                    vis_loss.append([vl, al, l_bw, l_imi, l_fw, l_cons])
+                    legend=['Value loss','policy loss', 'BW Loss','IMI loss', 'CONST loss']
+                elif self.args.model_type == 'bw':
                     vis_loss.append([vl, al, l_bw, l_imi])
                     legend=['Value loss','policy loss', 'BW Loss','IMI loss']
                 else:
@@ -187,7 +192,7 @@ class a2c_agent:
                     legend=['Value loss','policy loss']
                 vis_timesteps.append((update+1)*(self.args.num_processes * self.args.nsteps))
                 vis_rewards.append(final_rewards.mean())
-                title = self.args.env_name
+                title = self.args.env_name + '--' + self.args.model_type
                 if win is None:
                     win = self.vis.line(Y=np.array(vis_rewards), X=np.array(vis_timesteps), opts=dict(title=title, xlabel='Timesteps',
                                 ylabel='Avg Rewards'))
@@ -214,7 +219,7 @@ class a2c_agent:
             returns = returns.cuda()
             actions = actions.cuda()
         # evaluate actions
-        action_log_probs = evaluate_mj(self.args, mu, sigma, actions)
+        action_log_probs, dist_entropy = evaluate_mj(self.args, mu, sigma, actions, False)
         # calculate advantages...
         advantages = returns - values
         # get the value loss
@@ -222,13 +227,13 @@ class a2c_agent:
         # get the action loss. We detach advantages to reduce to standard PG form upon diff
         action_loss = -(advantages.detach() * action_log_probs).mean()
         # total loss
-        total_loss = action_loss + self.args.value_loss_coef * value_loss
+        total_loss = action_loss + self.args.value_loss_coef * value_loss - dist_entropy.mean() * self.args.entropy_coef
         # start to update
         self.optimizer.zero_grad()
         total_loss.backward()
         torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.max_grad_norm)
         self.optimizer.step()
-        return value_loss.item(), action_loss.item(), advantages.mean()
+        return value_loss.item(), action_loss.item(), dist_entropy.mean()
 
     def _get_tensors(self, obs):
         """

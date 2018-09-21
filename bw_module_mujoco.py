@@ -110,16 +110,16 @@ class bw_module:
             self.bw_actgen.cuda()
             self.bw_stategen.cuda()
         self.bw_params = list(self.bw_actgen.parameters()) + list(self.bw_stategen.parameters())
-        # self.bw_optimizer = torch.optim.RMSprop(self.bw_params, lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
-        self.bw_optimizer = torch.optim.Adam(self.bw_params, lr=self.args.lr)
+        self.bw_optimizer = torch.optim.RMSprop(self.bw_params, lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+        # self.bw_optimizer = torch.optim.Adam(self.bw_params, lr=self.args.lr)
         
         #Create a forward model
         if self.args.consistency:
             self.fw_stategen = StateGen(self.obs_shape, self.action_shape)
             if self.args.cuda:
                 self.fw_stategen.cuda()
-            # self.fw_optimizer = torch.optim.RMSprop(self.fw_stategen.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
-            self.fw_optimizer = torch.optim.Adam(self.fw_stategen.parameters(), lr=self.args.lr)
+            self.fw_optimizer = torch.optim.RMSprop(self.fw_stategen.parameters(), lr=self.args.lr, eps=self.args.eps, alpha=self.args.alpha)
+            # self.fw_optimizer = torch.optim.Adam(self.fw_stategen.parameters(), lr=self.args.lr)
         #Create an episode buffer of size : # processes
         self.running_episodes = [[] for _ in range(self.args.num_processes)]
         self.buffer = PrioritizedReplayBuffer(self.args.capacity, self.args.sil_alpha)
@@ -169,12 +169,14 @@ class bw_module:
             if self.args.cuda:
                 a_sigma = a_sigma.cuda()
             # Calculate Losses
-            action_log_probs = evaluate_mj(self.args, a_mu, a_sigma, actions)
-            state_log_probs = evaluate_mj(self.args, s_mu, s_sigma, obs - obs_next)
+            action_log_probs, action_entropy = evaluate_mj(self.args, a_mu, a_sigma, actions)
+            state_log_probs, state_entropy = evaluate_mj(self.args, s_mu, s_sigma, obs - obs_next)
             if self.args.per_weight:
-                total_loss = -torch.mean(action_log_probs*weights) - torch.mean(state_log_probs*weights)
+                entropy_loss = self.args.entropy_coef*(torch.mean(action_entropy*weights)+torch.mean(state_entropy*weights))
+                total_loss = -torch.mean(action_log_probs*weights) - torch.mean(state_log_probs*weights) - entropy_loss
             else:
-                total_loss = -torch.mean(action_log_probs) - torch.mean(state_log_probs)
+                entropy_loss = self.args.entropy_coef*(action_entropy.mean()+state_entropy.mean())
+                total_loss = -torch.mean(action_log_probs) - torch.mean(state_log_probs) - entropy_loss
             self.bw_optimizer.zero_grad()
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.bw_params, self.args.max_grad_norm)
@@ -189,11 +191,11 @@ class bw_module:
             # Train FW - Model
             if self.args.consistency:
                 f_mu, f_sigma = self.fw_stategen(obs, actions)
-                log_probs = evaluate_mj(self.args, f_mu, f_sigma, obs_next)
+                log_probs, dist_entropy = evaluate_mj(self.args, f_mu, f_sigma, obs_next)
                 if self.args.per_weight:
-                    fw_loss = -torch.mean(log_probs)
+                    fw_loss = -torch.mean(log_probs*weights) - self.args.entropy_coef*torch.mean(dist_entropy*weights)
                 else:
-                    fw_loss = -torch.mean(log_probs*weights)
+                    fw_loss = -torch.mean(log_probs) - self.args.entropy_coef*(dist_entropy.mean())
                 self.fw_optimizer.zero_grad()
                 fw_loss.backward()
                 torch.nn.under.clip_grad_norm_(self.fw_stategen.parameters(), self.args.max_grad_norm)
@@ -241,7 +243,6 @@ class bw_module:
                 mb_actions.append(actions.cpu().numpy())
                 mb_states_prev.append(states_prev.cpu().numpy())
             # Begin to do Imitation Learning
-            # mb_actions = torch.tensor(mb_actions, dtype=torch.float32).unsqueeze(1).view(self.args.num_states*self.args.trace_size, -1)
             mb_actions = torch.tensor(mb_actions, dtype=torch.float32).view(self.args.num_states*self.args.trace_size, -1)
             mb_states_prev = torch.tensor(mb_states_prev, dtype=torch.float32).view(self.args.num_states*self.args.trace_size, -1)
             if self.args.cuda:
@@ -249,11 +250,11 @@ class bw_module:
                 mb_states_prev = mb_states_prev.cuda()
             _, mu, sigma = self.network(mb_states_prev)
             try:
-                action_log_probs = evaluate_mj(self.args, mu, sigma, mb_actions)
+                action_log_probs, dist_entropy = evaluate_mj(self.args, mu, sigma, mb_actions)
             except:
                 print(mu, sigma)
                 import ipdb;ipdb.set_trace()
-            total_loss = -torch.mean(action_log_probs)
+            total_loss = -torch.mean(action_log_probs) - - self.args.entropy_coef*(dist_entropy.mean())
             self.optimizer.zero_grad()
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.args.max_grad_norm)
