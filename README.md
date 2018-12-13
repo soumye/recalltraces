@@ -1,4 +1,6 @@
-# Self-Imitation-Learning with A2C
+# This is an implementation of [Recall Traces](https://arxiv.org/abs/1804.00379) for Atari Tasks.
+
+## Adapted from Self-Imitation-Learning
 ![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)   
 This is the pytorch version of the **A2C + SIL** - **which is basiclly the same as the openai baselines**. The paper could be found [Here](https://arxiv.org/abs/1806.05635).  
 ## TODO List
